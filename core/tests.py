@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.test import TestCase
 
 from .models import Party, StoreSettings
@@ -27,3 +28,16 @@ class StoreSettingsTests(TestCase):
     def test_enabled_modules_is_empty(self):
         s = StoreSettings.objects.create(store_name="Test Store")
         self.assertEqual(s.enabled_modules, [])
+
+    def test_second_instance_is_rejected(self):
+        StoreSettings.objects.create(store_name="Test Store1")
+        with self.assertRaises(ValidationError):
+            StoreSettings.objects.create(store_name="Test Store2")
+        self.assertEqual(StoreSettings.objects.count(), 1)
+
+    def test_changing_store_name_does_not_raise(self):
+        s = StoreSettings.objects.create(store_name="Test Store")
+        s.store_name = "Changed Name"
+        s.save()
+        s.refresh_from_db()
+        self.assertEqual(s.store_name, "Changed Name")

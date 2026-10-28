@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 
 
@@ -70,6 +71,11 @@ class StoreSettings(models.Model):
     enabled_modules = models.JSONField(
         default=list, blank=True, verbose_name="ماژول‌های فعال"
     )
+
+    def save(self, *args, **kwargs):
+        if self.pk is None and StoreSettings.objects.exists():
+            raise ValidationError("فقط یک فروشگاه می‌توانید در تنظیمات فروشگاه ثبت کنید")
+        super().save(*args, **kwargs)
 
     class Meta:
         verbose_name = "تنظیمات فروشگاه"
