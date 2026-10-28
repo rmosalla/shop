@@ -52,3 +52,23 @@ class StoreSettingsTests(TestCase):
     def test_clean_allows_existing_instance(self):
         s = StoreSettings.objects.create(store_name="Test Store")
         s.full_clean()
+
+    def test_has_module_true_when_enabled(self):
+        s = StoreSettings.objects.create(
+            store_name="Test Store",
+            enabled_modules=["currency"],
+        )
+        self.assertTrue(s.has_module("currency"))
+
+    def test_has_module_false_when_not_enabled(self):
+        s = StoreSettings.objects.create(
+            store_name="Test Store",
+            enabled_modules=["currency"],
+        )
+        self.assertFalse(s.has_module("installments"))
+
+    def test_has_module_false_when_empty(self):
+        s = StoreSettings.objects.create(
+            store_name="Test Store",
+        )
+        self.assertFalse(s.has_module("installments"))
