@@ -41,3 +41,14 @@ class StoreSettingsTests(TestCase):
         s.save()
         s.refresh_from_db()
         self.assertEqual(s.store_name, "Changed Name")
+
+    def test_clean_rejects_second_instance(self):
+        StoreSettings.objects.create(store_name="Test Store")
+        second = StoreSettings(store_name="Test Store2")
+        with self.assertRaises(ValidationError):
+            second.full_clean()
+        self.assertEqual(StoreSettings.objects.count(), 1)
+
+    def test_clean_allows_existing_instance(self):
+        s = StoreSettings.objects.create(store_name="Test Store")
+        s.full_clean()

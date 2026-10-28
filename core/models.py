@@ -72,10 +72,17 @@ class StoreSettings(models.Model):
         default=list, blank=True, verbose_name="ماژول‌های فعال"
     )
 
-    def save(self, *args, **kwargs):
+    def _ensure_single_instance(self):
         if self.pk is None and StoreSettings.objects.exists():
             raise ValidationError("فقط یک فروشگاه می‌توانید در تنظیمات فروشگاه ثبت کنید")
+
+    def save(self, *args, **kwargs):
+        self._ensure_single_instance()
         super().save(*args, **kwargs)
+
+    def clean(self, *args, **kwargs):
+        self._ensure_single_instance()
+        super().clean()
 
     class Meta:
         verbose_name = "تنظیمات فروشگاه"
