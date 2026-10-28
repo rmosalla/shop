@@ -2,3 +2,7 @@ extend-exclude = ["*/migrations/*"]
 
 [lint]
 select = ["E", "F", "W", "I", "RUF"]
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[lint.per-file-ignores]
+"config/settings.py" = ["E501"]

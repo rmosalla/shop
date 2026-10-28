@@ -34,7 +34,7 @@ class Party(TimeStamped):
     is_active = models.BooleanField(default=True)
 
     class Meta:
-        ordering = ["name"]
+        ordering = ("name",)
 
     def __str__(self):
         return self.name
@@ -74,7 +74,6 @@ class StoreSettings(models.Model):
     class Meta:
         verbose_name = "تنظیمات فروشگاه"
         verbose_name_plural = "تنظیمات فروشگاه"
-        ordering = ("name",)
 
     def __str__(self):
         return self.store_name
