@@ -1,6 +1,6 @@
 from django.test import TestCase
 
-from .models import Party
+from .models import Party, StoreSettings
 
 
 class PartyTests(TestCase):
@@ -11,3 +11,19 @@ class PartyTests(TestCase):
     def test_roles_default_to_false(self):
         p = Party.objects.create(name="x")
         self.assertFalse(p.is_supplier or p.is_customer or p.is_partner or p.is_seller)
+
+
+class StoreSettingsTests(TestCase):
+    def test_defaults_are_set(self):
+        s = StoreSettings.objects.create(store_name="Test Store")
+        self.assertEqual(s.base_currency, "IRT")
+        self.assertEqual(s.profit_mode, "base")
+        self.assertEqual(s.costing_method, "wavg")
+
+    def test_str_returns_name(self):
+        s = StoreSettings.objects.create(store_name="Test Store")
+        self.assertEqual(str(s), "Test Store")
+
+    def test_enabled_modules_is_empty(self):
+        s = StoreSettings.objects.create(store_name="Test Store")
+        self.assertEqual(s.enabled_modules, [])
