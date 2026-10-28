@@ -1,0 +1,4 @@
+extend-exclude = ["*/migrations/*"]
+
+[lint]
+select = ["E", "F", "W", "I", "RUF"]

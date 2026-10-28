@@ -74,6 +74,7 @@ class StoreSettings(models.Model):
     class Meta:
         verbose_name = "تنظیمات فروشگاه"
         verbose_name_plural = "تنظیمات فروشگاه"
+        ordering = ("name",)
 
     def __str__(self):
         return self.store_name
