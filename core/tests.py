@@ -76,3 +76,9 @@ class StoreSettingsTests(TestCase):
         self.assertEqual(StoreSettings.objects.count(), 0)
         StoreSettings.get_solo()
         self.assertEqual(StoreSettings.objects.count(), 1)
+
+    def test_get_solo_returns_existing_settings(self):
+        existing = StoreSettings.objects.create(store_name="Test Store")
+        found = StoreSettings.get_solo()
+        self.assertEqual(found.pk, existing.pk)
+        self.assertEqual(StoreSettings.objects.count(), 1)
