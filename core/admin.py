@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Party, StoreSettings
+from .models import Party, Period, StoreSettings
 
 
 @admin.register(Party)
@@ -21,3 +21,8 @@ class PartyAdmin(admin.ModelAdmin):
 @admin.register(StoreSettings)
 class StoreSettingsAdmin(admin.ModelAdmin):
     list_display = ("store_name", "profit_mode")
+
+
+@admin.register(Period)
+class PeriodAdmin(admin.ModelAdmin):
+    list_display = ("name", "start_date", "end_date", "status")

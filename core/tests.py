@@ -1,7 +1,9 @@
+from datetime import date
+
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 
-from .models import Party, StoreSettings
+from .models import Party, Period, StoreSettings
 
 
 class PartyTests(TestCase):
@@ -82,3 +84,24 @@ class StoreSettingsTests(TestCase):
         found = StoreSettings.get_solo()
         self.assertEqual(found.pk, existing.pk)
         self.assertEqual(StoreSettings.objects.count(), 1)
+
+
+class PeriodTests(TestCase):
+    def test_reject_reversed_dates(self):
+        p = Period(
+            name="october", start_date=date(2026, 10, 30), end_date=date(2026, 10, 1)
+        )
+        with self.assertRaises(ValidationError):
+            p.full_clean()
+
+    def test_valid_period_is_accepted(self):
+        p = Period(
+            name="october", start_date=date(2026, 10, 1), end_date=date(2026, 10, 30)
+        )
+        p.full_clean()
+
+    def test_add_one_day_period_accepted(self):
+        p = Period(
+            name="one day", start_date=date(2026, 10, 1), end_date=date(2026, 10, 1)
+        )
+        p.full_clean()

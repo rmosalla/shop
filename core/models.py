@@ -100,3 +100,46 @@ class StoreSettings(models.Model):
 
     def __str__(self):
         return self.store_name
+
+
+class Period(TimeStamped):
+    """دوره‌ی زمانی تسویه (مثلا یک ماه)."""
+
+    class Status(models.TextChoices):
+        OPEN = "open", "باز"
+        CLOSED = "closed", "بسته"
+
+    name = models.CharField(max_length=100, verbose_name="نام دوره")
+    start_date = models.DateField(verbose_name="تاریخ شروع")
+    end_date = models.DateField(verbose_name="تاریخ پایان")
+    status = models.CharField(
+        max_length=10,
+        choices=Status.choices,
+        default=Status.OPEN,
+        verbose_name="وضعیت",
+    )
+    closed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="زمان بسته‌شدن",
+    )
+    closed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        verbose_name="بسته‌شده توسط",
+    )
+
+    def clean(self):
+        if self.start_date < self.end_date:
+            raise ValidationError("تاریخ پایان نمی‌تواند کوچکتر از تاریخ شروع باشد")
+        super().clean()
+
+    class Meta:
+        ordering = ("-start_date",)
+        verbose_name = "دوره"
+        verbose_name_plural = "دوره‌ها"
+
+    def __str__(self):
+        return self.name
