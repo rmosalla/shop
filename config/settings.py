@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "accounts",
     "core",
+    "jalali_suite",
 ]
 AUTH_USER_MODEL = "accounts.User"
 LANGUAGE_CODE = "fa"

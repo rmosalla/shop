@@ -1,4 +1,5 @@
 from django.contrib import admin
+from jalali_suite.admin import JalaliDateModelAdmin
 
 from .models import Party, Period, StoreSettings
 
@@ -24,5 +25,6 @@ class StoreSettingsAdmin(admin.ModelAdmin):
 
 
 @admin.register(Period)
-class PeriodAdmin(admin.ModelAdmin):
+class PeriodAdmin(JalaliDateModelAdmin):
+    jalali_widgets_for_gregorian_fields = True
     list_display = ("name", "start_date", "end_date", "status")

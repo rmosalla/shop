@@ -133,7 +133,7 @@ class Period(TimeStamped):
 
     def clean(self):
         if self.start_date > self.end_date:
-            raise ValidationError("تاریخ پایان نمی‌تواند کوچکتر از تاریخ شروع باشد")
+            raise ValidationError("تاریخ پایان نمی‌تواند کوچک‌تر از تاریخ شروع باشد")
         super().clean()
 
     class Meta:
