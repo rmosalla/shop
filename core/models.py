@@ -87,6 +87,13 @@ class StoreSettings(models.Model):
         self._ensure_single_instance()
         super().clean()
 
+    @classmethod
+    def get_solo(cls):
+        store = cls.objects.first()
+        if store is None:
+            store = cls.objects.create(store_name="فروشگاه من")
+        return store
+
     class Meta:
         verbose_name = "تنظیمات فروشگاه"
         verbose_name_plural = "تنظیمات فروشگاه"

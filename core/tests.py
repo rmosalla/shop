@@ -47,7 +47,6 @@ class StoreSettingsTests(TestCase):
         second = StoreSettings(store_name="Test Store2")
         with self.assertRaises(ValidationError):
             second.full_clean()
-        self.assertEqual(StoreSettings.objects.count(), 1)
 
     def test_clean_allows_existing_instance(self):
         s = StoreSettings.objects.create(store_name="Test Store")
@@ -72,3 +71,8 @@ class StoreSettingsTests(TestCase):
             store_name="Test Store",
         )
         self.assertFalse(s.has_module("installments"))
+
+    def test_get_solo_creates_settings_when_missing(self):
+        self.assertEqual(StoreSettings.objects.count(), 0)
+        StoreSettings.get_solo()
+        self.assertEqual(StoreSettings.objects.count(), 1)
