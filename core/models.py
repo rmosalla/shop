@@ -143,7 +143,7 @@ class Period(TimeStamped):
         self.status = self.Status.CLOSED
         self.closed_at = timezone.now()
         self.closed_by = user
-        self.save()
+        self.save(update_fields=["status", "closed_at", "closed_by"])
 
     @classmethod
     def assert_date_open(cls, target_date):
