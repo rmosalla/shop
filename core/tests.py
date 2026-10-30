@@ -211,3 +211,13 @@ class PeriodCloseTests(TestCase):
         self.period.close(self.user)
         with self.assertRaises(ValidationError):
             self.period.full_clean()
+
+    def test_delete_closed_period_rejected(self):
+        self.period.close(self.user)
+        with self.assertRaises(ValidationError):
+            self.period.delete()
+        self.assertEqual(Period.objects.count(), 1)
+
+    def test_delete_open_period_accepted(self):
+        self.period.delete()
+        self.assertEqual(Period.objects.count(), 0)

@@ -150,9 +150,13 @@ class Period(TimeStamped):
             and self.end_date is not None
             and self.start_date > self.end_date
         ):
-            raise ValidationError("...")
+            raise ValidationError("تاریخ پایان نمی‌تواند کوچک‌تر از تاریخ شروع باشد")
         self._ensure_not_closed()
         super().clean()
+
+    def delete(self, *args, **kwargs):
+        self._ensure_not_closed()
+        super().delete(*args, **kwargs)
 
     def close(self, user):
         if self.status == self.Status.CLOSED:
@@ -182,4 +186,4 @@ class Period(TimeStamped):
                 status=self.Status.CLOSED,
             ).exists()
         ):
-            raise ValidationError("دوره‌ی بسته‌شده قابل ویرایش نیست")
+            raise ValidationError("دوره‌ی بسته‌شده قابل ویرایش یا حذف نیست")
