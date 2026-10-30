@@ -159,6 +159,11 @@ class PeriodTests(TestCase):
         )
         Period.assert_date_open(date(2026, 11, 1))
 
+    def test_add_period_without_startdate_or_enddate_reject(self):
+        p = Period(name="No date")
+        with self.assertRaises(ValidationError):
+            p.full_clean()
+
 
 class PeriodCloseTests(TestCase):
     def setUp(self):

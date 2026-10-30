@@ -73,12 +73,12 @@ class StoreSettings(models.Model):
         default=list, blank=True, verbose_name="ماژول‌های فعال"
     )
 
-    def has_module(self, module_name):
-        return module_name in self.enabled_modules
+    class Meta:
+        verbose_name = "تنظیمات فروشگاه"
+        verbose_name_plural = "تنظیمات فروشگاه"
 
-    def _ensure_single_instance(self):
-        if self.pk is None and StoreSettings.objects.exists():
-            raise ValidationError("فقط یک فروشگاه می‌توانید در تنظیمات فروشگاه ثبت کنید")
+    def __str__(self):
+        return self.store_name
 
     def save(self, *args, **kwargs):
         self._ensure_single_instance()
@@ -88,19 +88,19 @@ class StoreSettings(models.Model):
         self._ensure_single_instance()
         super().clean()
 
+    def has_module(self, module_name):
+        return module_name in self.enabled_modules
+
+    def _ensure_single_instance(self):
+        if self.pk is None and StoreSettings.objects.exists():
+            raise ValidationError("فقط یک فروشگاه می‌توانید در تنظیمات فروشگاه ثبت کنید")
+
     @classmethod
     def get_solo(cls):
         store = cls.objects.first()
         if store is None:
             store = cls.objects.create(store_name="فروشگاه من")
         return store
-
-    class Meta:
-        verbose_name = "تنظیمات فروشگاه"
-        verbose_name_plural = "تنظیمات فروشگاه"
-
-    def __str__(self):
-        return self.store_name
 
 
 class Period(TimeStamped):
@@ -132,9 +132,31 @@ class Period(TimeStamped):
         verbose_name="بسته‌شده توسط",
     )
 
+    class Meta:
+        ordering = ("-start_date",)
+        verbose_name = "دوره"
+        verbose_name_plural = "دوره‌ها"
+
+    def __str__(self):
+        return self.name
+
+    def save(self, *args, **kwargs):
+        self._ensure_not_closed()
+        super().save(*args, **kwargs)
+
+    def clean(self):
+        if (
+            self.start_date is not None
+            and self.end_date is not None
+            and self.start_date > self.end_date
+        ):
+            raise ValidationError("...")
+        self._ensure_not_closed()
+        super().clean()
+
     def close(self, user):
         if self.status == self.Status.CLOSED:
-            raise ValidationError("این دوره قبلا بسته شده است")
+            raise ValidationError("این دوره قبلاً بسته شده است")
         self.status = self.Status.CLOSED
         self.closed_at = timezone.now()
         self.closed_by = user
@@ -160,22 +182,4 @@ class Period(TimeStamped):
                 status=self.Status.CLOSED,
             ).exists()
         ):
-            raise ValidationError("این دوره قبلا بسته شده‌است")
-
-    def save(self, *args, **kwargs):
-        self._ensure_not_closed()
-        super().save(*args, **kwargs)
-
-    def clean(self):
-        if self.start_date > self.end_date:
-            raise ValidationError("تاریخ پایان نمی‌تواند کوچک‌تر از تاریخ شروع باشد")
-        self._ensure_not_closed()
-        super().clean()
-
-    class Meta:
-        ordering = ("-start_date",)
-        verbose_name = "دوره"
-        verbose_name_plural = "دوره‌ها"
-
-    def __str__(self):
-        return self.name
+            raise ValidationError("دوره‌ی بسته‌شده قابل ویرایش نیست")
