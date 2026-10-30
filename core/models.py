@@ -132,11 +132,6 @@ class Period(TimeStamped):
         verbose_name="بسته‌شده توسط",
     )
 
-    def clean(self):
-        if self.start_date > self.end_date:
-            raise ValidationError("تاریخ پایان نمی‌تواند کوچک‌تر از تاریخ شروع باشد")
-        super().clean()
-
     def close(self, user):
         if self.status == self.Status.CLOSED:
             raise ValidationError("این دوره قبلا بسته شده است")
@@ -156,6 +151,26 @@ class Period(TimeStamped):
             raise ValidationError(
                 "تاریخ در دوره بسته‌شده است. تاریخ را اصلاح کنید یا سند برگشت ثبت کنید."
             )
+
+    def _ensure_not_closed(self):
+        if (
+            self.pk is not None
+            and Period.objects.filter(
+                pk=self.pk,
+                status=self.Status.CLOSED,
+            ).exists()
+        ):
+            raise ValidationError("این دوره قبلا بسته شده‌است")
+
+    def save(self, *args, **kwargs):
+        self._ensure_not_closed()
+        super().save(*args, **kwargs)
+
+    def clean(self):
+        if self.start_date > self.end_date:
+            raise ValidationError("تاریخ پایان نمی‌تواند کوچک‌تر از تاریخ شروع باشد")
+        self._ensure_not_closed()
+        super().clean()
 
     class Meta:
         ordering = ("-start_date",)

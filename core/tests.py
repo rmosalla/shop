@@ -189,3 +189,20 @@ class PeriodCloseTests(TestCase):
         self.period.close(self.user)
         with self.assertRaises(ValidationError):
             self.period.close(self.user)
+
+    def test_edit_closed_period_rejected(self):
+        self.period.close(self.user)
+        self.period.end_date = date(2026, 10, 15)
+        with self.assertRaises(ValidationError):
+            self.period.save()
+
+    def test_edit_open_period_accepted(self):
+        self.period.end_date = date(2026, 10, 15)
+        self.period.save()
+        self.period.refresh_from_db()
+        self.assertEqual(self.period.end_date, date(2026, 10, 15))
+
+    def test_clean_edit_closed_period_rejected(self):
+        self.period.close(self.user)
+        with self.assertRaises(ValidationError):
+            self.period.full_clean()

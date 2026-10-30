@@ -47,8 +47,10 @@ class PeriodAdmin(JalaliDateModelAdmin):
                 self.message_user(
                     request, f"دوره «{period.name}» قبلاً بسته شده است.", messages.ERROR
                 )
-
-        self.message_user(
-            request,
-            f"تعداد «{counter}» دوره با موفقیت بسته شد",
-        )
+        if counter > 0:
+            self.message_user(
+                request,
+                f"تعداد «{counter}» دوره با موفقیت بسته شد",
+            )
+        else:
+            self.message_user(request, "دوره‌ای برای بستن نبود", messages.ERROR)
