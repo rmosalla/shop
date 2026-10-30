@@ -105,3 +105,52 @@ class PeriodTests(TestCase):
             name="one day", start_date=date(2026, 10, 1), end_date=date(2026, 10, 1)
         )
         p.full_clean()
+
+    def test_reject_date_in_closed_period(self):
+        Period.objects.create(
+            name="october",
+            start_date=date(2026, 10, 1),
+            end_date=date(2026, 10, 30),
+            status=Period.Status.CLOSED,
+        )
+        with self.assertRaises(ValidationError):
+            Period.assert_date_open(date(2026, 10, 5))
+
+    def test_date_in_open_period_accepted(self):
+        Period.objects.create(
+            name="october",
+            start_date=date(2026, 10, 1),
+            end_date=date(2026, 10, 30),
+        )
+        Period.assert_date_open(date(2026, 10, 5))
+
+    def test_date_with_no_periods_is_accepted(self):
+        Period.assert_date_open(date(2026, 10, 5))
+
+    def test_date_equal_to_closed_period_stat_date_rejected(self):
+        Period.objects.create(
+            name="october",
+            start_date=date(2026, 10, 1),
+            end_date=date(2026, 10, 30),
+            status=Period.Status.CLOSED,
+        )
+        with self.assertRaises(ValidationError):
+            Period.assert_date_open(date(2026, 10, 1))
+
+    def test_date_equal_to_closed_period_end_date_rejected(self):
+        Period.objects.create(
+            name="october",
+            start_date=date(2026, 10, 1),
+            end_date=date(2026, 10, 30),
+            status=Period.Status.CLOSED,
+        )
+        with self.assertRaises(ValidationError):
+            Period.assert_date_open(date(2026, 10, 30))
+
+    def test_date_out_of_closed_period_accepted(self):
+        Period.objects.create(
+            name="october",
+            start_date=date(2026, 10, 1),
+            end_date=date(2026, 10, 30),
+        )
+        Period.assert_date_open(date(2026, 11, 1))

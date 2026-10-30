@@ -136,6 +136,18 @@ class Period(TimeStamped):
             raise ValidationError("تاریخ پایان نمی‌تواند کوچک‌تر از تاریخ شروع باشد")
         super().clean()
 
+    @classmethod
+    def assert_date_open(cls, target_date):
+        is_locked = cls.objects.filter(
+            start_date__lte=target_date,
+            end_date__gte=target_date,
+            status=cls.Status.CLOSED,
+        ).exists()
+        if is_locked:
+            raise ValidationError(
+                "تاریخ در دوره بسته‌شده است. تاریخ را اصلاح کنید یا سند برگشت ثبت کنید."
+            )
+
     class Meta:
         ordering = ("-start_date",)
         verbose_name = "دوره"
