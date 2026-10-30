@@ -1,5 +1,6 @@
 from datetime import date
 
+from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 
@@ -127,7 +128,7 @@ class PeriodTests(TestCase):
     def test_date_with_no_periods_is_accepted(self):
         Period.assert_date_open(date(2026, 10, 5))
 
-    def test_date_equal_to_closed_period_stat_date_rejected(self):
+    def test_date_equal_to_closed_period_start_date_rejected(self):
         Period.objects.create(
             name="october",
             start_date=date(2026, 10, 1),
@@ -152,5 +153,54 @@ class PeriodTests(TestCase):
             name="october",
             start_date=date(2026, 10, 1),
             end_date=date(2026, 10, 30),
+            status=Period.Status.CLOSED,
         )
         Period.assert_date_open(date(2026, 11, 1))
+
+    def test_close_period_worked(self):
+        p = Period.objects.create(
+            name="october",
+            start_date=date(2026, 10, 1),
+            end_date=date(2026, 10, 30),
+        )
+        User = get_user_model()
+        user = User.objects.create_user(username="admin", password="pass12345")
+        p.close(user)
+        p.refresh_from_db()
+        self.assertEqual(p.status, Period.Status.CLOSED)
+
+    def test_close_period_closed_by_logined_user(self):
+        p = Period.objects.create(
+            name="october",
+            start_date=date(2026, 10, 1),
+            end_date=date(2026, 10, 30),
+        )
+        User = get_user_model()
+        user = User.objects.create_user(username="admin", password="pass12345")
+        p.close(user)
+        p.refresh_from_db()
+        self.assertEqual(p.closed_by, user)
+
+    def test_close_period_closed_at_not_none(self):
+        p = Period.objects.create(
+            name="october",
+            start_date=date(2026, 10, 1),
+            end_date=date(2026, 10, 30),
+        )
+        User = get_user_model()
+        user = User.objects.create_user(username="admin", password="pass12345")
+        p.close(user)
+        p.refresh_from_db()
+        self.assertIsNotNone(p.closed_at)
+
+    def test_close_closed_period_rejected(self):
+        p = Period.objects.create(
+            name="october",
+            start_date=date(2026, 10, 1),
+            end_date=date(2026, 10, 30),
+            status=Period.Status.CLOSED,
+        )
+        User = get_user_model()
+        user = User.objects.create_user(username="admin", password="pass12345")
+        with self.assertRaises(ValidationError):
+            p.close(user)

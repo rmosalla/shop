@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.utils import timezone
 
 
 class TimeStamped(models.Model):
@@ -135,6 +136,14 @@ class Period(TimeStamped):
         if self.start_date > self.end_date:
             raise ValidationError("تاریخ پایان نمی‌تواند کوچک‌تر از تاریخ شروع باشد")
         super().clean()
+
+    def close(self, user):
+        if self.status == self.Status.CLOSED:
+            raise ValidationError("این دوره قبلا بسته شده است")
+        self.status = self.Status.CLOSED
+        self.closed_at = timezone.now()
+        self.closed_by = user
+        self.save()
 
     @classmethod
     def assert_date_open(cls, target_date):
