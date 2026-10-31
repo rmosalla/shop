@@ -84,7 +84,7 @@ class StoreSettings(models.Model):
         self._ensure_single_instance()
         super().save(*args, **kwargs)
 
-    def clean(self, *args, **kwargs):
+    def clean(self):
         self._ensure_single_instance()
         super().clean()
 
@@ -152,6 +152,7 @@ class Period(TimeStamped):
         ):
             raise ValidationError("تاریخ پایان نمی‌تواند کوچک‌تر از تاریخ شروع باشد")
         self._ensure_not_closed()
+        self._ensure_no_overlap()
         super().clean()
 
     def delete(self, *args, **kwargs):
@@ -187,3 +188,13 @@ class Period(TimeStamped):
             ).exists()
         ):
             raise ValidationError("دوره‌ی بسته‌شده قابل ویرایش یا حذف نیست")
+
+    def _ensure_no_overlap(self):
+        if self.start_date is not None and self.end_date is not None:
+            overlapping = Period.objects.filter(
+                start_date__lte=self.end_date,
+                end_date__gte=self.start_date,
+            ).exclude(pk=self.pk)
+            if overlapping.exists():
+                other = overlapping.first()
+                raise ValidationError(f"این دوره با دوره «{other}»هم‌پوشانی دارد ")

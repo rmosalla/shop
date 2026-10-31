@@ -221,3 +221,60 @@ class PeriodCloseTests(TestCase):
     def test_delete_open_period_accepted(self):
         self.period.delete()
         self.assertEqual(Period.objects.count(), 0)
+
+
+class PeriodOverlapTests(TestCase):
+    def setUp(self):
+        self.october = Period.objects.create(
+            name="october",
+            start_date=date(2026, 10, 1),
+            end_date=date(2026, 10, 30),
+        )
+
+    def test_partial_overlap_rejected(self):
+        p = Period(
+            name="overlap",
+            start_date=date(2026, 10, 15),
+            end_date=date(2026, 11, 15),
+        )
+        with self.assertRaises(ValidationError):
+            p.full_clean()
+
+    def test_period_inside_another_rejected(self):
+        p = Period(
+            name="inside",
+            start_date=date(2026, 10, 10),
+            end_date=date(2026, 10, 20),
+        )
+        with self.assertRaises(ValidationError):
+            p.full_clean()
+
+    def test_period_containing_another_rejected(self):
+        p = Period(
+            name="wide",
+            start_date=date(2026, 9, 1),
+            end_date=date(2026, 11, 30),
+        )
+        with self.assertRaises(ValidationError):
+            p.full_clean()
+
+    def test_sharing_one_day_rejected(self):
+        p = Period(
+            name="shared day",
+            start_date=date(2026, 10, 30),
+            end_date=date(2026, 11, 30),
+        )
+        with self.assertRaises(ValidationError):
+            p.full_clean()
+
+    def test_adjacent_period_accepted(self):
+        p = Period(
+            name="november",
+            start_date=date(2026, 11, 1),
+            end_date=date(2026, 11, 30),
+        )
+        p.full_clean()
+
+    def test_editing_same_period_accepted(self):
+        self.october.name = "renamed"
+        self.october.full_clean()
