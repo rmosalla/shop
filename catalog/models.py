@@ -90,7 +90,7 @@ class Variant(TimeStamped):
         max_digits=18,
         decimal_places=3,
         default=0,
-        verbose_name="فیمت",
+        verbose_name="قیمت",
         validators=[MinValueValidator(0)],
     )
     is_active = models.BooleanField(default=True, verbose_name="فعال")
