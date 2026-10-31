@@ -1,5 +1,5 @@
 from django.core.exceptions import ValidationError
-from django.core.validators import MinValueValidator
+from django.core.validators import MinValueValidator, RegexValidator
 from django.db import models
 
 from core.models import TimeStamped
@@ -124,6 +124,7 @@ class Variant(TimeStamped):
             raise ValidationError(
                 {"attributes": "این فیلد باید یک دیکشنری (dict) باشد."}
             )
+        self._validate_attributes()
         self.attributes_key = self._build_attributes_key()
         if self.product_id is not None:
             duplicates = Variant.objects.filter(
@@ -139,3 +140,88 @@ class Variant(TimeStamped):
         for key, value in sorted(self.attributes.items()):
             parts.append(f"{key}={value}")
         return "|".join(parts)
+
+    def _validate_attributes(self):
+        types = AttributeDefinition.ValueType
+        definitions = {
+            d.key: d
+            for d in AttributeDefinition.objects.filter(
+                key__in=self.attributes.keys(), is_active=True
+            )
+        }
+        errors = []
+        for key, value in self.attributes.items():
+            definition = definitions.get(key)
+            if definition is None:
+                errors.append(f"مشخصه‌ی «{key}» تعریف نشده یا غیرفعال است.")
+                continue
+            label = definition.label
+            if definition.value_type == types.NUMBER:
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    errors.append(f"مقدار «{label}» باید عدد باشد.")
+            elif definition.value_type == types.TEXT:
+                if not isinstance(value, str) or not value.strip():
+                    errors.append(f"مقدار «{label}» باید متنِ غیرخالی باشد.")
+            elif definition.value_type == types.CHOICE:
+                if value not in definition.choices:
+                    options = "، ".join(definition.choices)
+                    errors.append(f"مقدار «{label}» باید یکی از این‌ها باشد: {options}")
+        if errors:
+            raise ValidationError({"attributes": errors})
+
+
+class AttributeDefinition(TimeStamped):
+    """تعریف مشخصه‌های قابل استفاده در کانفیگ (مثل رم و SSD)"""
+
+    class ValueType(models.TextChoices):
+        TEXT = "text", "متن"
+        NUMBER = "number", "عدد"
+        CHOICE = "choice", "انتخابی"
+
+    key = models.CharField(
+        max_length=50,
+        unique=True,
+        validators=[
+            RegexValidator(
+                regex=r"^[a-z][a-z0-9_]*$",
+                message=(
+                    "کلید باید با یک حرف کوچک انگلیسی شروع شود "
+                    "و فقط شامل حروف کوچک انگلیسی، اعداد و زیرخط باشد."
+                ),
+                code="invalid_key",
+            )
+        ],
+        verbose_name="کلید",
+    )
+    label = models.CharField(max_length=100, verbose_name="نام نمایشی")
+    value_type = models.CharField(
+        max_length=10,
+        choices=ValueType.choices,
+        verbose_name="نوع مقدار",
+        default=ValueType.TEXT,
+    )
+    choices = models.JSONField(default=list, blank=True, verbose_name="گزینه‌ها")
+    unit = models.CharField(max_length=20, blank=True, verbose_name="واحد")
+    is_active = models.BooleanField(default=True, verbose_name="فعال")
+
+    class Meta:
+        ordering = ("label",)
+        verbose_name = "مشخصه"
+        verbose_name_plural = "مشخصه‌ها"
+
+    def __str__(self):
+        return self.label
+
+    def clean(self):
+        if self.value_type == self.ValueType.CHOICE:
+            if (
+                not isinstance(self.choices, list)
+                or not self.choices
+                or not all(isinstance(item, str) for item in self.choices)
+            ):
+                raise ValidationError(
+                    {"choices": "گزینه‌ها باید فهرستی غیرخالی از متن باشند"}
+                )
+        elif self.choices:
+            raise ValidationError({"choices": "این نوع گزینه نمی‌خواهد"})
+        super().clean()

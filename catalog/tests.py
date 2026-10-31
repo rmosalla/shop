@@ -3,7 +3,7 @@ from django.db import IntegrityError, transaction
 from django.db.models import ProtectedError
 from django.test import TestCase
 
-from .models import Category, Product, Variant
+from .models import AttributeDefinition, Category, Product, Variant
 
 
 class CategoryTests(TestCase):
@@ -162,6 +162,12 @@ class VariantUniquenessTests(TestCase):
         self.other_product = Product.objects.create(
             category=category, brand="HP", model_name="EliteBook 840"
         )
+        AttributeDefinition.objects.create(
+            key="ram", label="رم", value_type=AttributeDefinition.ValueType.NUMBER
+        )
+        AttributeDefinition.objects.create(
+            key="ssd", label="SSD", value_type=AttributeDefinition.ValueType.NUMBER
+        )
 
     def test_same_attributes_same_product_rejected(self):
         Variant.objects.create(
@@ -225,3 +231,137 @@ class VariantUniquenessTests(TestCase):
         v = Variant(product=self.product, sku="A", attributes=[1, 2])
         with self.assertRaises(ValidationError):
             v.full_clean()
+
+
+class AttributeDefinitionTests(TestCase):
+    def test_defaults(self):
+        a = AttributeDefinition.objects.create(key="note", label="توضیح")
+        self.assertEqual(a.value_type, AttributeDefinition.ValueType.TEXT)
+        self.assertEqual(a.choices, [])
+        self.assertEqual(a.unit, "")
+        self.assertTrue(a.is_active)
+
+    def test_str_returns_label(self):
+        a = AttributeDefinition.objects.create(key="ram", label="رم")
+        self.assertEqual(str(a), "رم")
+
+    def test_duplicate_key_rejected(self):
+        AttributeDefinition.objects.create(key="ram", label="رم")
+        second = AttributeDefinition(key="ram", label="حافظه")
+        with self.assertRaises(ValidationError):
+            second.full_clean()
+
+    def test_invalid_keys_rejected(self):
+        for key in ["RAM", "ram size", "رم", "1ram", "ram-size", ""]:
+            with self.subTest(key=key):
+                a = AttributeDefinition(key=key, label="x")
+                with self.assertRaises(ValidationError):
+                    a.full_clean()
+
+    def test_valid_keys_accepted(self):
+        for key in ["ram", "ssd_size", "m2"]:
+            with self.subTest(key=key):
+                AttributeDefinition(key=key, label="x").full_clean()
+
+    def test_choice_type_requires_choices(self):
+        a = AttributeDefinition(
+            key="cpu",
+            label="پردازنده",
+            value_type=AttributeDefinition.ValueType.CHOICE,
+        )
+        with self.assertRaises(ValidationError):
+            a.full_clean()
+
+    def test_choices_must_be_list_of_strings(self):
+        for bad in [[1, 2], "i5", {"a": "b"}]:
+            with self.subTest(choices=bad):
+                a = AttributeDefinition(
+                    key="cpu",
+                    label="پردازنده",
+                    value_type=AttributeDefinition.ValueType.CHOICE,
+                    choices=bad,
+                )
+                with self.assertRaises(ValidationError):
+                    a.full_clean()
+
+    def test_choice_type_with_choices_accepted(self):
+        a = AttributeDefinition(
+            key="cpu",
+            label="پردازنده",
+            value_type=AttributeDefinition.ValueType.CHOICE,
+            choices=["i5", "i7"],
+        )
+        a.full_clean()
+
+    def test_non_choice_type_with_choices_rejected(self):
+        a = AttributeDefinition(
+            key="ram",
+            label="رم",
+            value_type=AttributeDefinition.ValueType.NUMBER,
+            choices=["8", "16"],
+        )
+        with self.assertRaises(ValidationError):
+            a.full_clean()
+
+
+class VariantAttributeValidationTests(TestCase):
+    def setUp(self):
+        category = Category.objects.create(name="Laptop")
+        self.product = Product.objects.create(
+            category=category, brand="Dell", model_name="Latitude 5420"
+        )
+        ValueType = AttributeDefinition.ValueType
+        AttributeDefinition.objects.create(
+            key="ram", label="رم", value_type=ValueType.NUMBER, unit="GB"
+        )
+        AttributeDefinition.objects.create(
+            key="cpu",
+            label="پردازنده",
+            value_type=ValueType.CHOICE,
+            choices=["i5", "i7"],
+        )
+        AttributeDefinition.objects.create(
+            key="note", label="توضیح", value_type=ValueType.TEXT
+        )
+        AttributeDefinition.objects.create(
+            key="hdd", label="هارد", value_type=ValueType.NUMBER, is_active=False
+        )
+
+    def make(self, attributes):
+        return Variant(product=self.product, sku="X", attributes=attributes)
+
+    def test_unknown_key_rejected(self):
+        with self.assertRaises(ValidationError):
+            self.make({"RAM": 16}).full_clean()
+
+    def test_inactive_attribute_rejected(self):
+        with self.assertRaises(ValidationError):
+            self.make({"hdd": 500}).full_clean()
+
+    def test_number_rejects_string(self):
+        with self.assertRaises(ValidationError):
+            self.make({"ram": "16"}).full_clean()
+
+    def test_number_rejects_boolean(self):
+        with self.assertRaises(ValidationError):
+            self.make({"ram": True}).full_clean()
+
+    def test_choice_rejects_unlisted_value(self):
+        with self.assertRaises(ValidationError):
+            self.make({"cpu": "i9"}).full_clean()
+
+    def test_choice_accepts_listed_value(self):
+        self.make({"cpu": "i7"}).full_clean()
+
+    def test_text_rejects_empty_string(self):
+        with self.assertRaises(ValidationError):
+            self.make({"note": ""}).full_clean()
+
+    def test_text_accepts_string(self):
+        self.make({"note": "refurbished"}).full_clean()
+
+    def test_multiple_valid_attributes_accepted(self):
+        self.make({"ram": 16, "cpu": "i5", "note": "x"}).full_clean()
+
+    def test_empty_attributes_accepted(self):
+        self.make({}).full_clean()
