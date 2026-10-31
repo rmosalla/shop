@@ -1,4 +1,5 @@
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
 from django.db.models import ProtectedError
 from django.test import TestCase
 
@@ -150,3 +151,77 @@ class VariantTests(TestCase):
         Variant.objects.create(product=self.product, sku="DELL-5420-A")
         with self.assertRaises(ProtectedError):
             self.product.delete()
+
+
+class VariantUniquenessTests(TestCase):
+    def setUp(self):
+        category = Category.objects.create(name="Laptop")
+        self.product = Product.objects.create(
+            category=category, brand="Dell", model_name="Latitude 5420"
+        )
+        self.other_product = Product.objects.create(
+            category=category, brand="HP", model_name="EliteBook 840"
+        )
+
+    def test_same_attributes_same_product_rejected(self):
+        Variant.objects.create(
+            product=self.product, sku="A", attributes={"ram": 16, "ssd": 512}
+        )
+        second = Variant(
+            product=self.product, sku="B", attributes={"ram": 16, "ssd": 512}
+        )
+        with self.assertRaises(ValidationError):
+            second.full_clean()
+
+    def test_attribute_order_does_not_matter(self):
+        Variant.objects.create(
+            product=self.product, sku="A", attributes={"ram": 16, "ssd": 512}
+        )
+        second = Variant(
+            product=self.product, sku="B", attributes={"ssd": 512, "ram": 16}
+        )
+        with self.assertRaises(ValidationError):
+            second.full_clean()
+
+    def test_two_variants_without_attributes_rejected(self):
+        Variant.objects.create(product=self.product, sku="A")
+        second = Variant(product=self.product, sku="B")
+        with self.assertRaises(ValidationError):
+            second.full_clean()
+
+    def test_different_attribute_value_accepted(self):
+        Variant.objects.create(
+            product=self.product, sku="A", attributes={"ram": 16, "ssd": 512}
+        )
+        second = Variant(
+            product=self.product, sku="B", attributes={"ram": 32, "ssd": 512}
+        )
+        second.full_clean()
+
+    def test_same_attributes_on_other_product_accepted(self):
+        Variant.objects.create(
+            product=self.product, sku="A", attributes={"ram": 16, "ssd": 512}
+        )
+        second = Variant(
+            product=self.other_product, sku="B", attributes={"ram": 16, "ssd": 512}
+        )
+        second.full_clean()
+
+    def test_editing_same_variant_accepted(self):
+        v = Variant.objects.create(
+            product=self.product, sku="A", attributes={"ram": 16, "ssd": 512}
+        )
+        v.full_clean()
+
+    def test_database_rejects_duplicate_even_without_clean(self):
+        Variant.objects.create(product=self.product, sku="A", attributes={"ram": 16})
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Variant.objects.create(
+                    product=self.product, sku="B", attributes={"ram": 16}
+                )
+
+    def test_attributes_must_be_a_dict(self):
+        v = Variant(product=self.product, sku="A", attributes=[1, 2])
+        with self.assertRaises(ValidationError):
+            v.full_clean()

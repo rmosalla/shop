@@ -86,6 +86,9 @@ class Variant(TimeStamped):
     )
     sku = models.CharField(max_length=80, unique=True, verbose_name="کد یکتا")
     attributes = models.JSONField(default=dict, blank=True, verbose_name="مشخصات")
+    attributes_key = models.CharField(
+        max_length=500, default="", blank=True, editable=False, verbose_name="کد مشخصات"
+    )
     default_price_base = models.DecimalField(
         max_digits=18,
         decimal_places=3,
@@ -100,8 +103,39 @@ class Variant(TimeStamped):
             "product",
             "sku",
         )
+        constraints = (
+            models.UniqueConstraint(
+                fields=("product", "attributes_key"),
+                name="uniq_variant_product_attributes",
+            ),
+        )
         verbose_name = "کانفیگ"
         verbose_name_plural = "کانفیگ‌ها"
 
     def __str__(self):
         return self.sku
+
+    def save(self, *args, **kwargs):
+        self.attributes_key = self._build_attributes_key()
+        super().save(*args, **kwargs)
+
+    def clean(self):
+        if not isinstance(self.attributes, dict):
+            raise ValidationError(
+                {"attributes": "این فیلد باید یک دیکشنری (dict) باشد."}
+            )
+        self.attributes_key = self._build_attributes_key()
+        if self.product_id is not None:
+            duplicates = Variant.objects.filter(
+                product_id=self.product_id,
+                attributes_key=self.attributes_key,
+            ).exclude(pk=self.pk)
+            if duplicates.exists():
+                raise ValidationError("این مدل با این مشخصات قبلاً ثبت شده است")
+        super().clean()
+
+    def _build_attributes_key(self):
+        parts = []
+        for key, value in sorted(self.attributes.items()):
+            parts.append(f"{key}={value}")
+        return "|".join(parts)
