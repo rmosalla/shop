@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Category, Product, Variant
+from .models import AttributeDefinition, Category, Product, Variant
 
 
 @admin.register(Category)
@@ -41,3 +41,22 @@ class VariantAdmin(admin.ModelAdmin):
         "product__model_name",
     )
     list_filter = ("is_active",)
+
+
+@admin.register(AttributeDefinition)
+class AttributeDefinitionAdmin(admin.ModelAdmin):
+    list_display = (
+        "label",
+        "key",
+        "value_type",
+        "unit",
+        "is_active",
+    )
+    list_filter = (
+        "value_type",
+        "is_active",
+    )
+    search_fields = (
+        "key",
+        "label",
+    )
