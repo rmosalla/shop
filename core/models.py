@@ -17,14 +17,14 @@ class TimeStamped(models.Model):
 class Party(TimeStamped):
     """طرف حساب: تأمین‌کننده، مشتری، شریک، فروشنده."""
 
-    name = models.CharField(max_length=200)
-    phone = models.CharField(max_length=30, blank=True)
-    note = models.TextField(blank=True)
+    name = models.CharField(max_length=200, verbose_name="نام")
+    phone = models.CharField(max_length=30, blank=True, verbose_name="تلفن")
+    note = models.TextField(blank=True, verbose_name="شرح")
 
-    is_supplier = models.BooleanField(default=False)
-    is_customer = models.BooleanField(default=False)
-    is_partner = models.BooleanField(default=False)
-    is_seller = models.BooleanField(default=False)
+    is_supplier = models.BooleanField(default=False, verbose_name="تامین کننده")
+    is_customer = models.BooleanField(default=False, verbose_name="خریدار")
+    is_partner = models.BooleanField(default=False, verbose_name="شریک")
+    is_seller = models.BooleanField(default=False, verbose_name="فروشنده")
 
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,

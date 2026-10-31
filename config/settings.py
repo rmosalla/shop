@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     "accounts",
     "core",
     "jalali_suite",
+    "catalog",
 ]
 AUTH_USER_MODEL = "accounts.User"
 LANGUAGE_CODE = "fa"
