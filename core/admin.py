@@ -54,3 +54,8 @@ class PeriodAdmin(JalaliDateModelAdmin):
             )
         else:
             self.message_user(request, "دوره‌ای برای بستن نبود", messages.ERROR)
+
+    def has_delete_permission(self, request, obj=None):
+        if obj is not None and obj.status == Period.Status.CLOSED:
+            return False
+        return super().has_delete_permission(request, obj)
