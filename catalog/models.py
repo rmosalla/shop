@@ -1,4 +1,5 @@
 from django.core.exceptions import ValidationError
+from django.core.validators import MinValueValidator
 from django.db import models
 
 from core.models import TimeStamped
@@ -72,3 +73,35 @@ class Product(TimeStamped):
 
     def __str__(self):
         return f"{self.brand} {self.model_name}" if self.brand else self.model_name
+
+
+class Variant(TimeStamped):
+    """کانفیگ"""
+
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.PROTECT,
+        related_name="variants",
+        verbose_name="کالا",
+    )
+    sku = models.CharField(max_length=80, unique=True, verbose_name="کد یکتا")
+    attributes = models.JSONField(default=dict, blank=True, verbose_name="مشخصات")
+    default_price_base = models.DecimalField(
+        max_digits=18,
+        decimal_places=3,
+        default=0,
+        verbose_name="فیمت",
+        validators=[MinValueValidator(0)],
+    )
+    is_active = models.BooleanField(default=True, verbose_name="فعال")
+
+    class Meta:
+        ordering = (
+            "product",
+            "sku",
+        )
+        verbose_name = "کانفیگ"
+        verbose_name_plural = "کانفیگ‌ها"
+
+    def __str__(self):
+        return self.sku

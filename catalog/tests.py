@@ -2,7 +2,7 @@ from django.core.exceptions import ValidationError
 from django.db.models import ProtectedError
 from django.test import TestCase
 
-from .models import Category, Product
+from .models import Category, Product, Variant
 
 
 class CategoryTests(TestCase):
@@ -93,3 +93,60 @@ class ProductTests(TestCase):
     def test_model_name_allows_200_chars(self):
         p = Product(category=self.category, model_name="x" * 200)
         p.full_clean()
+
+
+class VariantTests(TestCase):
+    def setUp(self):
+        category = Category.objects.create(name="Laptop")
+        self.product = Product.objects.create(
+            category=category, brand="Dell", model_name="Latitude 5420"
+        )
+
+    def test_defaults(self):
+        v = Variant.objects.create(product=self.product, sku="DELL-5420-A")
+        self.assertEqual(v.attributes, {})
+        self.assertEqual(v.default_price_base, 0)
+        self.assertTrue(v.is_active)
+
+    def test_str_returns_sku(self):
+        v = Variant.objects.create(product=self.product, sku="DELL-5420-A")
+        self.assertEqual(str(v), "DELL-5420-A")
+
+    def test_attributes_are_stored_and_loaded(self):
+        v = Variant.objects.create(
+            product=self.product,
+            sku="DELL-5420-A",
+            attributes={"ram": 16, "ssd": 512},
+        )
+        v.refresh_from_db()
+        self.assertEqual(v.attributes, {"ram": 16, "ssd": 512})
+
+    def test_duplicate_sku_rejected(self):
+        Variant.objects.create(product=self.product, sku="DELL-5420-A")
+        second = Variant(product=self.product, sku="DELL-5420-A")
+        with self.assertRaises(ValidationError):
+            second.full_clean()
+
+    def test_blank_sku_rejected(self):
+        v = Variant(product=self.product, sku="")
+        with self.assertRaises(ValidationError):
+            v.full_clean()
+
+    def test_negative_price_rejected(self):
+        v = Variant(product=self.product, sku="x", default_price_base=-1)
+        with self.assertRaises(ValidationError):
+            v.full_clean()
+
+    def test_variant_without_product_rejected(self):
+        v = Variant(sku="x")
+        with self.assertRaises(ValidationError):
+            v.full_clean()
+
+    def test_variants_reachable_from_product(self):
+        v = Variant.objects.create(product=self.product, sku="DELL-5420-A")
+        self.assertEqual(list(self.product.variants.all()), [v])
+
+    def test_cannot_delete_product_with_variants(self):
+        Variant.objects.create(product=self.product, sku="DELL-5420-A")
+        with self.assertRaises(ProtectedError):
+            self.product.delete()

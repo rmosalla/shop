@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Category, Product
+from .models import Category, Product, Variant
 
 
 @admin.register(Category)
@@ -26,3 +26,18 @@ class ProductAdmin(admin.ModelAdmin):
     )
     list_filter = ("tracking_type", "category", "is_active")
     search_fields = ("model_name", "category__name", "brand", "part_number")
+
+
+@admin.register(Variant)
+class VariantAdmin(admin.ModelAdmin):
+    list_display = (
+        "product",
+        "sku",
+        "default_price_base",
+        "is_active",
+    )
+    search_fields = (
+        "sku",
+        "product__model_name",
+    )
+    list_filter = ("is_active",)
