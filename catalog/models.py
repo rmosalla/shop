@@ -5,28 +5,30 @@ from core.models import TimeStamped
 
 
 class Category(TimeStamped):
-    """مشخصات کالاها"""
+    """دسته‌بندی کالا‌ها"""
 
-    name = models.CharField(max_length=100, verbose_name="نام")
-    parent = models.OneToOneField(
+    name = models.CharField(max_length=100, unique=True, verbose_name="نام")
+    parent = models.ForeignKey(
         "self",
         null=True,
         blank=True,
         on_delete=models.PROTECT,
         related_name="children",
+        verbose_name="دسته‌ی والد",
     )
+    is_active = models.BooleanField(default=True, verbose_name="فعال")
 
     class Meta:
         ordering = ("name",)
-        verbose_name = "مشخصات کالا"
-        verbose_name_plural = "مشخصات کالاها"
+        verbose_name = "دسته‌بندی کالا"
+        verbose_name_plural = "دسته‌بندی کالاها"
 
     def __str__(self):
         return self.name
 
     def clean(self):
-        if self.pk == self.parent_id:
-            raise ValidationError("والد نمی‌تواند با فرزند یکی باشد")
+        if self.pk is not None and self.pk == self.parent_id:
+            raise ValidationError("یک دسته نمی‌تواند والد خودش باشد")
         super().clean()
 
 
@@ -37,16 +39,15 @@ class Product(TimeStamped):
         SERIALIZED = "serialized", "سریال شده"
         QUANTITY = "quantity", "کمیت"
 
-    category = models.OneToOneField(
+    category = models.ForeignKey(
         Category,
-        null=True,
-        blank=True,
         on_delete=models.PROTECT,
-        related_name="category",
+        related_name="products",
+        verbose_name="دسته‌بندی",
     )
 
     brand = models.CharField(blank=True, max_length=100, verbose_name="برند")
-    model_name = models.CharField(max_length=100, verbose_name="مدل")
+    model_name = models.CharField(max_length=200, verbose_name="مدل")
     part_number = models.CharField(
         blank=True, db_index=True, max_length=100, verbose_name="پارت نامبر"
     )
@@ -62,11 +63,12 @@ class Product(TimeStamped):
     is_active = models.BooleanField(default=True, verbose_name="فعال")
 
     class Meta:
-        ordering = ("brand",)
+        ordering = (
+            "brand",
+            "model_name",
+        )
         verbose_name = "کالا"
         verbose_name_plural = "کالاها"
 
     def __str__(self):
-        return (
-            f"{self.brand} {self.model_name}".strip() if self.brand else self.model_name
-        )
+        return f"{self.brand} {self.model_name}" if self.brand else self.model_name
