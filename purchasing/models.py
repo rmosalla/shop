@@ -37,7 +37,7 @@ class Purchase(TimeStamped):
         verbose_name="وضعیت",
         default=Status.DRAFT,
     )
-    note = models.TextField(max_length=200, verbose_name="یادداشت", blank=True)
+    note = models.TextField(verbose_name="یادداشت", blank=True)
 
     class Meta:
         ordering = ("-date", "-id")
