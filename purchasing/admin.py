@@ -1,6 +1,11 @@
 from django.contrib import admin
 
-from .models import Purchase
+from .models import Purchase, PurchaseLine
+
+
+class PurchaseLineInline(admin.TabularInline):
+    model = PurchaseLine
+    extra = 1
 
 
 @admin.register(Purchase)
@@ -11,6 +16,7 @@ class PurchaseAdmin(admin.ModelAdmin):
         "invoice_no",
         "currency",
         "status",
+        "total",
     )
     list_filter = (
         "status",
@@ -20,3 +26,4 @@ class PurchaseAdmin(admin.ModelAdmin):
         "invoice_no",
         "supplier__name",
     )
+    inlines = (PurchaseLineInline,)
