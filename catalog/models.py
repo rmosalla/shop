@@ -118,7 +118,8 @@ class Variant(TimeStamped):
         max_digits=18,
         decimal_places=2,
         default=0,
-        verbose_name="قیمت",
+        verbose_name="قیمت فروش",
+        help_text="قیمت فروش جاری این کانفیگ. صفر یعنی هنوز قیمت‌گذاری نشده.",
         validators=[MinValueValidator(0)],
     )
     is_active = models.BooleanField(default=True, verbose_name="فعال")

@@ -2,7 +2,7 @@ from django.contrib import admin, messages
 from django.core.exceptions import ValidationError
 from jalali_suite.admin import JalaliDateModelAdmin
 
-from .models import Party, Period, StoreSettings
+from .models import Currency, Party, Period, StoreSettings
 
 
 @admin.register(Party)
@@ -59,3 +59,10 @@ class PeriodAdmin(JalaliDateModelAdmin):
         if obj is not None and obj.status == Period.Status.CLOSED:
             return False
         return super().has_delete_permission(request, obj)
+
+
+@admin.register(Currency)
+class CurrencyAdmin(admin.ModelAdmin):
+    list_display = ("code", "name", "symbol", "decimal_places", "is_active")
+    list_filter = ("is_active",)
+    search_fields = ("code", "name")

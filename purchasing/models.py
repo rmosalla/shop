@@ -1,10 +1,11 @@
 from decimal import ROUND_HALF_UP, Decimal
 
+from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models
 
 from catalog.models import Variant
-from core.models import Party, Period, TimeStamped
+from core.models import Party, Period, StoreSettings, TimeStamped
 
 
 class Purchase(TimeStamped):
@@ -30,7 +31,10 @@ class Purchase(TimeStamped):
         decimal_places=4,
         default=1,
         validators=[MinValueValidator(Decimal("0.0001"))],
-        verbose_name="نرخ تبدیل",
+        verbose_name="نرخ ارز",
+        help_text=(
+            "هر یک واحد ارز فاکتور چند واحد ارز پایه است؟ مثلاً برای دلار: ۲۷۵۰۰۰"
+        ),
     )
     status = models.CharField(
         max_length=10,
@@ -48,10 +52,29 @@ class Purchase(TimeStamped):
     def __str__(self):
         return f"{self.supplier.name} - {self.date}"
 
+    def save(self, *args, **kwargs):
+        self._normalize_currency()
+        super().save(*args, **kwargs)
+
     def clean(self):
+        self._normalize_currency()
         if self.date is not None:
             Period.assert_date_open(self.date)
-            super().clean()
+        self._ensure_rate_matches_currency()
+        super().clean()
+
+    def _normalize_currency(self):
+        self.currency = (self.currency or "").strip().upper()
+
+    def _ensure_rate_matches_currency(self):
+        base_currency = (
+            StoreSettings.objects.values_list("base_currency", flat=True).first()
+            or "IRT"
+        )
+        if self.currency == base_currency.upper() and self.exchange_rate != 1:
+            raise ValidationError(
+                {"exchange_rate": "برای ارز پایه‌ی فروشگاه، نرخ ارز باید ۱ باشد."}
+            )
 
     @property
     def total(self):

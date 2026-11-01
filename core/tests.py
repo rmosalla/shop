@@ -1,10 +1,11 @@
 from datetime import date
+from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 
-from .models import Party, Period, StoreSettings
+from .models import Currency, Party, Period, StoreSettings
 
 User = get_user_model()
 
@@ -278,3 +279,80 @@ class PeriodOverlapTests(TestCase):
     def test_editing_same_period_accepted(self):
         self.october.name = "renamed"
         self.october.full_clean()
+
+
+class CurrencyTests(TestCase):
+    def test_defaults(self):
+        c = Currency.objects.create(code="USD", name="دلار")
+        self.assertEqual(c.decimal_places, 2)
+        self.assertTrue(c.is_active)
+        self.assertEqual(c.symbol, "")
+
+    def test_str(self):
+        c = Currency.objects.create(code="USD", name="دلار")
+        self.assertEqual(str(c), "دلار (USD)")
+
+    def test_code_is_stored_uppercase(self):
+        c = Currency.objects.create(code="usd", name="دلار")
+        c.refresh_from_db()
+        self.assertEqual(c.code, "USD")
+
+    def test_full_clean_normalizes_lowercase_code(self):
+        c = Currency(code="usd", name="دلار")
+        c.full_clean()
+        self.assertEqual(c.code, "USD")
+
+    def test_duplicate_code_rejected_ignoring_case(self):
+        Currency.objects.create(code="USD", name="دلار")
+        second = Currency(code="usd", name="دلار دوم")
+        with self.assertRaises(ValidationError):
+            second.full_clean()
+
+    def test_invalid_codes_rejected(self):
+        for code in ["US", "USDT", "12A", "US$", "دلا", ""]:
+            with self.subTest(code=code):
+                with self.assertRaises(ValidationError):
+                    Currency(code=code, name="x").full_clean()
+
+    def test_decimal_places_out_of_range_rejected(self):
+        for places in [-1, 3]:
+            with self.subTest(places=places):
+                with self.assertRaises(ValidationError):
+                    Currency(code="USD", name="x", decimal_places=places).full_clean()
+
+    def test_valid_decimal_places_accepted(self):
+        for places in [0, 1, 2]:
+            with self.subTest(places=places):
+                Currency(code="USD", name="x", decimal_places=places).full_clean()
+
+
+class CurrencyRoundingTests(TestCase):
+    def setUp(self):
+        self.toman = Currency.objects.create(code="IRT", name="تومان", decimal_places=0)
+        self.dollar = Currency.objects.create(code="USD", name="دلار")
+
+    def test_quantum(self):
+        self.assertEqual(self.toman.quantum, Decimal("1"))
+        self.assertEqual(self.dollar.quantum, Decimal("0.01"))
+
+    def test_zero_decimals_rounds_half_up(self):
+        self.assertEqual(self.toman.round(Decimal("1500.5")), Decimal("1501"))
+        self.assertEqual(self.toman.round(Decimal("1500.4")), Decimal("1500"))
+
+    def test_two_decimals_rounds_half_up(self):
+        self.assertEqual(self.dollar.round(Decimal("10.125")), Decimal("10.13"))
+        self.assertEqual(self.dollar.round(Decimal("10.124")), Decimal("10.12"))
+
+    def test_negative_half_rounds_away_from_zero(self):
+        self.assertEqual(self.toman.round(Decimal("-1500.5")), Decimal("-1501"))
+
+    def test_result_has_the_currency_exponent(self):
+        self.assertEqual(self.toman.round(Decimal("5")).as_tuple().exponent, 0)
+        self.assertEqual(self.dollar.round(Decimal("5")).as_tuple().exponent, -2)
+
+    def test_integer_input_accepted(self):
+        self.assertEqual(self.dollar.round(5), Decimal("5.00"))
+
+    def test_float_input_rejected(self):
+        with self.assertRaises(TypeError):
+            self.dollar.round(5.1)

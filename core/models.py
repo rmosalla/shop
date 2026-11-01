@@ -1,5 +1,8 @@
+from decimal import ROUND_HALF_UP, Decimal
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.validators import MaxValueValidator, RegexValidator
 from django.db import models
 from django.utils import timezone
 
@@ -12,6 +15,62 @@ class TimeStamped(models.Model):
 
     class Meta:
         abstract = True
+
+
+class Currency(TimeStamped):
+    """ارزهای قابل استفاده در فروشگاه (ارز پایه و ارزهای خارجی)."""
+
+    code = models.CharField(
+        max_length=3,
+        unique=True,
+        validators=[
+            RegexValidator(
+                regex=r"^[A-Za-z]{3}$",
+                message="کد ارز باید سه حرف انگلیسی باشد، مثل USD.",
+                code="invalid_currency_code",
+            )
+        ],
+        verbose_name="کد ارز",
+    )
+    name = models.CharField(max_length=50, verbose_name="نام")
+    symbol = models.CharField(max_length=10, blank=True, verbose_name="نماد")
+    decimal_places = models.PositiveSmallIntegerField(
+        default=2,
+        validators=[MaxValueValidator(2)],
+        verbose_name="تعداد ارقام اعشار",
+        help_text="۰ یعنی همیشه رند به عدد صحیح. حداکثر ۲.",
+    )
+    is_active = models.BooleanField(default=True, verbose_name="فعال")
+
+    class Meta:
+        ordering = ("code",)
+        verbose_name = "ارز"
+        verbose_name_plural = "ارزها"
+
+    def __str__(self):
+        return f"{self.name} ({self.code})"
+
+    def save(self, *args, **kwargs):
+        self._normalize_code()
+        super().save(*args, **kwargs)
+
+    def clean(self):
+        self._normalize_code()
+        super().clean()
+
+    def _normalize_code(self):
+        self.code = (self.code or "").strip().upper()
+
+    @property
+    def quantum(self):
+        """کوچک‌ترین واحد این ارز: ۱ یا ۰٫۰۱"""
+        return Decimal(10) ** -self.decimal_places
+
+    def round(self, amount):
+        """مبلغ را به تعداد اعشار این ارز گرد می‌کند (نیم به بالا)."""
+        if isinstance(amount, float):
+            raise TypeError("مبلغ را به‌صورت Decimal بدهید، نه float.")
+        return Decimal(amount).quantize(self.quantum, rounding=ROUND_HALF_UP)
 
 
 class Party(TimeStamped):
