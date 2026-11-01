@@ -130,11 +130,6 @@ class VariantTests(TestCase):
         with self.assertRaises(ValidationError):
             second.full_clean()
 
-    def test_blank_sku_rejected(self):
-        v = Variant(product=self.product, sku="")
-        with self.assertRaises(ValidationError):
-            v.full_clean()
-
     def test_negative_price_rejected(self):
         v = Variant(product=self.product, sku="x", default_price_base=-1)
         with self.assertRaises(ValidationError):
@@ -153,6 +148,86 @@ class VariantTests(TestCase):
         Variant.objects.create(product=self.product, sku="DELL-5420-A")
         with self.assertRaises(ProtectedError):
             self.product.delete()
+
+
+class VariantSkuTests(TestCase):
+    def setUp(self):
+        self.category = Category.objects.create(name="Laptop")
+        self.product = Product.objects.create(
+            category=self.category, brand="Dell", model_name="Latitude 5420"
+        )
+
+    def test_sku_built_from_product_and_attributes(self):
+        v = Variant.objects.create(
+            product=self.product, attributes={"ram": 16, "ssd": 512}
+        )
+        self.assertEqual(v.sku, "DELL-LATITUDE-5420-16-512")
+
+    def test_sku_without_attributes(self):
+        v = Variant.objects.create(product=self.product)
+        self.assertEqual(v.sku, "DELL-LATITUDE-5420")
+
+    def test_attribute_order_does_not_change_sku(self):
+        v = Variant.objects.create(
+            product=self.product, attributes={"ssd": 512, "ram": 16}
+        )
+        self.assertEqual(v.sku, "DELL-LATITUDE-5420-16-512")
+
+    def test_decimal_value_keeps_its_point_as_underscore(self):
+        v = Variant.objects.create(product=self.product, attributes={"screen": 15.6})
+        self.assertEqual(v.sku, "DELL-LATITUDE-5420-15_6")
+
+    def test_text_value_is_slugified(self):
+        v = Variant.objects.create(product=self.product, attributes={"cpu": "Core i7"})
+        self.assertEqual(v.sku, "DELL-LATITUDE-5420-CORE-I7")
+
+    def test_explicit_sku_is_kept(self):
+        v = Variant.objects.create(product=self.product, sku="CUSTOM-1")
+        self.assertEqual(v.sku, "CUSTOM-1")
+
+    def test_duplicate_generated_sku_gets_numeric_suffix(self):
+        other = Product.objects.create(
+            category=self.category, brand="Dell", model_name="Latitude 5420"
+        )
+        first = Variant.objects.create(product=self.product)
+        second = Variant.objects.create(product=other)
+        third_product = Product.objects.create(
+            category=self.category, brand="Dell", model_name="Latitude 5420"
+        )
+        third = Variant.objects.create(product=third_product)
+        self.assertEqual(first.sku, "DELL-LATITUDE-5420")
+        self.assertEqual(second.sku, "DELL-LATITUDE-5420-2")
+        self.assertEqual(third.sku, "DELL-LATITUDE-5420-3")
+
+    def test_sku_does_not_change_when_attributes_change(self):
+        v = Variant.objects.create(product=self.product, attributes={"ram": 16})
+        old_sku = v.sku
+        v.attributes = {"ram": 32}
+        v.save()
+        v.refresh_from_db()
+        self.assertEqual(v.sku, old_sku)
+
+    def test_non_latin_name_falls_back_to_product_id(self):
+        product = Product.objects.create(category=self.category, model_name="لپ‌تاپ")
+        v = Variant.objects.create(product=product)
+        self.assertEqual(v.sku, f"P{product.pk}")
+
+    def test_long_names_are_truncated(self):
+        product = Product.objects.create(
+            category=self.category, brand="B" * 90, model_name="M" * 150
+        )
+        first = Variant.objects.create(product=product)
+        other = Product.objects.create(
+            category=self.category, brand="B" * 90, model_name="M" * 150
+        )
+        second = Variant.objects.create(product=other)
+        self.assertLessEqual(len(first.sku), 80)
+        self.assertLessEqual(len(second.sku), 80)
+        self.assertNotEqual(first.sku, second.sku)
+
+    def test_blank_sku_is_allowed_in_full_clean(self):
+        v = Variant(product=self.product, attributes={})
+        v.full_clean()
 
 
 class VariantUniquenessTests(TestCase):

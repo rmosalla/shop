@@ -1,6 +1,7 @@
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator, RegexValidator
 from django.db import models
+from django.utils.text import slugify
 
 from core.models import TimeStamped
 
@@ -84,7 +85,13 @@ class Variant(TimeStamped):
         related_name="variants",
         verbose_name="کالا",
     )
-    sku = models.CharField(max_length=80, unique=True, verbose_name="کد یکتا")
+    sku = models.CharField(
+        max_length=80,
+        blank=True,
+        unique=True,
+        verbose_name="کد یکتا",
+        help_text="اگر خالی بماند خودکار ساخته می‌شود",
+    )
     attributes = models.JSONField(default=dict, blank=True, verbose_name="مشخصات")
     attributes_key = models.CharField(
         max_length=500, default="", blank=True, editable=False, verbose_name="کد مشخصات"
@@ -117,6 +124,8 @@ class Variant(TimeStamped):
 
     def save(self, *args, **kwargs):
         self.attributes_key = self._build_attributes_key()
+        if not self.sku:
+            self.sku = self._generate_sku()
         super().save(*args, **kwargs)
 
     def clean(self):
@@ -168,6 +177,19 @@ class Variant(TimeStamped):
                     errors.append(f"مقدار «{label}» باید یکی از این‌ها باشد: {options}")
         if errors:
             raise ValidationError({"attributes": errors})
+
+    def _generate_sku(self):
+        raw = [self.product.brand, self.product.model_name]
+        raw += [str(v).replace(".", "_") for _, v in sorted(self.attributes.items())]
+        parts = [slug for slug in (slugify(item) for item in raw) if slug]
+        base = "-".join(parts).upper()[:70] or f"P{self.product_id}"
+
+        candidate = base
+        number = 2
+        while Variant.objects.filter(sku=candidate).exclude(pk=self.pk).exists():
+            candidate = f"{base}-{number}"
+            number += 1
+        return candidate
 
 
 class AttributeDefinition(TimeStamped):
