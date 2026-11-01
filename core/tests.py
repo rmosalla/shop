@@ -10,6 +10,7 @@ from .models import (
     Party,
     Period,
     StoreSettings,
+    currency_choices,
     format_base,
     get_base_currency,
     get_base_currency_code,
@@ -64,6 +65,7 @@ class StoreSettingsTests(TestCase):
             second.full_clean()
 
     def test_clean_allows_existing_instance(self):
+        Currency.objects.create(code="IRT", name="تومان", decimal_places=0)
         s = StoreSettings.objects.create(store_name="Test Store")
         s.full_clean()
 
@@ -97,6 +99,44 @@ class StoreSettingsTests(TestCase):
         found = StoreSettings.get_solo()
         self.assertEqual(found.pk, existing.pk)
         self.assertEqual(StoreSettings.objects.count(), 1)
+
+    def test_unknown_base_currency_rejected(self):
+        s = StoreSettings(store_name="S", base_currency="XYZ")
+        with self.assertRaises(ValidationError):
+            s.full_clean()
+
+    def test_inactive_base_currency_rejected(self):
+        Currency.objects.create(
+            code="IRT", name="تومان", decimal_places=0, is_active=False
+        )
+        with self.assertRaises(ValidationError):
+            StoreSettings(store_name="S").full_clean()
+
+    def test_known_base_currency_accepted(self):
+        Currency.objects.create(code="IRT", name="تومان", decimal_places=0)
+        StoreSettings(store_name="S").full_clean()
+
+    def test_lowercase_base_currency_is_normalized_in_clean(self):
+        Currency.objects.create(code="USD", name="دلار")
+        s = StoreSettings(store_name="S", base_currency="usd")
+        s.full_clean()
+        self.assertEqual(s.base_currency, "USD")
+
+    def test_base_currency_is_stored_uppercase(self):
+        s = StoreSettings.objects.create(store_name="S", base_currency="iqd")
+        s.refresh_from_db()
+        self.assertEqual(s.base_currency, "IQD")
+
+    def test_get_solo_creates_default_currency(self):
+        StoreSettings.get_solo()
+        irt = Currency.objects.get(code="IRT")
+        self.assertEqual(irt.decimal_places, 0)
+
+    def test_get_solo_keeps_existing_currency_settings(self):
+        Currency.objects.create(code="IRT", name="ریال", decimal_places=2)
+        StoreSettings.get_solo()
+        self.assertEqual(Currency.objects.filter(code="IRT").count(), 1)
+        self.assertEqual(Currency.objects.get(code="IRT").decimal_places, 2)
 
 
 class PeriodTests(TestCase):
@@ -425,3 +465,15 @@ class BaseCurrencyHelpersTests(TestCase):
 
     def test_format_base_falls_back_to_two_decimals(self):
         self.assertEqual(format_base(Decimal("1500000")), "1,500,000.00")
+
+
+class CurrencyChoicesTests(TestCase):
+    def test_only_active_currencies_are_offered(self):
+        Currency.objects.create(code="USD", name="دلار")
+        Currency.objects.create(code="EUR", name="یورو", is_active=False)
+        codes = [code for code, _label in currency_choices()]
+        self.assertEqual(codes, ["USD"])
+
+    def test_choice_label_contains_name_and_code(self):
+        Currency.objects.create(code="USD", name="دلار")
+        self.assertEqual(currency_choices(), [("USD", "دلار (USD)")])

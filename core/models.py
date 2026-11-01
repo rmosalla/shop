@@ -144,25 +144,44 @@ class StoreSettings(models.Model):
         return self.store_name
 
     def save(self, *args, **kwargs):
+        self._normalize_base_currency()
         self._ensure_single_instance()
         super().save(*args, **kwargs)
 
     def clean(self):
+        self._normalize_base_currency()
         self._ensure_single_instance()
+        self._ensure_base_currency_is_available()
         super().clean()
 
-    def has_module(self, module_name):
-        return module_name in self.enabled_modules
+    def _normalize_base_currency(self):
+        self.base_currency = (self.base_currency or "").strip().upper()
 
     def _ensure_single_instance(self):
         if self.pk is None and StoreSettings.objects.exists():
             raise ValidationError("فقط یک فروشگاه می‌توانید در تنظیمات فروشگاه ثبت کنید")
+
+    def _ensure_base_currency_is_available(self):
+        available = Currency.objects.filter(
+            code=self.base_currency, is_active=True
+        ).exists()
+        if not available:
+            raise ValidationError(
+                {"base_currency": "این ارز در فهرست ارزها تعریف نشده یا غیرفعال است."}
+            )
+
+    def has_module(self, module_name):
+        return module_name in self.enabled_modules
 
     @classmethod
     def get_solo(cls):
         store = cls.objects.first()
         if store is None:
             store = cls.objects.create(store_name="فروشگاه من")
+            Currency.objects.get_or_create(
+                code=store.base_currency,
+                defaults={"name": "تومان", "decimal_places": 0},
+            )
         return store
 
 
@@ -290,3 +309,8 @@ def format_base(amount):
     if currency is None:
         return f"{amount:,.2f}"
     return currency.format_amount(amount)
+
+
+def currency_choices():
+    """گزینه‌های فهرست کشویی: ارزهای فعال به شکل (کد، نام نمایشی)."""
+    return [(c.code, str(c)) for c in Currency.objects.filter(is_active=True)]

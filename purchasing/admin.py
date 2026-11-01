@@ -1,6 +1,7 @@
+from django import forms
 from django.contrib import admin
 
-from core.models import format_base
+from core.models import currency_choices, format_base, get_base_currency_code
 
 from .models import Purchase, PurchaseLine
 
@@ -10,6 +11,19 @@ def format_in(amount, currency):
     if currency is None:
         return f"{amount:,.2f}"
     return currency.format_amount(amount)
+
+
+class PurchaseAdminForm(forms.ModelForm):
+    currency = forms.ChoiceField(label="ارز", choices=())
+
+    class Meta:
+        model = Purchase
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["currency"].choices = currency_choices()
+        self.fields["currency"].initial = get_base_currency_code()
 
 
 class PurchaseLineInline(admin.TabularInline):
@@ -32,6 +46,7 @@ class PurchaseLineInline(admin.TabularInline):
 
 @admin.register(Purchase)
 class PurchaseAdmin(admin.ModelAdmin):
+    form = PurchaseAdminForm
     list_display = (
         "date",
         "supplier",

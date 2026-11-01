@@ -1,8 +1,9 @@
+from django import forms
 from django.contrib import admin, messages
 from django.core.exceptions import ValidationError
 from jalali_suite.admin import JalaliDateModelAdmin
 
-from .models import Currency, Party, Period, StoreSettings
+from .models import Currency, Party, Period, StoreSettings, currency_choices
 
 
 @admin.register(Party)
@@ -20,9 +21,22 @@ class PartyAdmin(admin.ModelAdmin):
     search_fields = ("name", "phone")
 
 
+class StoreSettingsAdminForm(forms.ModelForm):
+    base_currency = forms.ChoiceField(label="ارز پایه", choices=())
+
+    class Meta:
+        model = StoreSettings
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["base_currency"].choices = currency_choices()
+
+
 @admin.register(StoreSettings)
 class StoreSettingsAdmin(admin.ModelAdmin):
-    list_display = ("store_name", "profit_mode")
+    form = StoreSettingsAdminForm
+    list_display = ("store_name", "base_currency", "profit_mode")
 
 
 @admin.register(Period)
