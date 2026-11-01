@@ -1,6 +1,15 @@
 from django.contrib import admin
 
+from core.models import format_base
+
 from .models import Purchase, PurchaseLine
+
+
+def format_in(amount, currency):
+    """مبلغ را با اعشار ارز نشان می‌دهد (اگر ارز تعریف نشده باشد، دو رقم)."""
+    if currency is None:
+        return f"{amount:,.2f}"
+    return currency.format_amount(amount)
 
 
 class PurchaseLineInline(admin.TabularInline):
@@ -12,13 +21,13 @@ class PurchaseLineInline(admin.TabularInline):
     def line_total(self, obj):
         if obj.pk is None:
             return "-"
-        return f"{obj.total:,.2f}"
+        return format_in(obj.total, obj.purchase.get_currency())
 
     @admin.display(description="جمع ردیف (ارز پایه)")
     def line_total_base(self, obj):
         if obj.pk is None:
             return "-"
-        return f"{obj.total_base:,.2f}"
+        return format_base(obj.total_base)
 
 
 @admin.register(Purchase)
@@ -45,8 +54,8 @@ class PurchaseAdmin(admin.ModelAdmin):
 
     @admin.display(description="جمع (ارز فاکتور)")
     def total_display(self, obj):
-        return f"{obj.total:,.2f} {obj.currency}"
+        return f"{format_in(obj.total, obj.get_currency())} {obj.currency}"
 
     @admin.display(description="جمع (ارز پایه)")
     def total_base_display(self, obj):
-        return f"{obj.total_base:,.2f}"
+        return format_base(obj.total_base)

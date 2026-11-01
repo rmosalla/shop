@@ -1,11 +1,18 @@
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models
 
 from catalog.models import Variant
-from core.models import Currency, Party, Period, StoreSettings, TimeStamped
+from core.models import (
+    Currency,
+    Party,
+    Period,
+    TimeStamped,
+    get_base_currency_code,
+    round_to_base,
+)
 
 
 class Purchase(TimeStamped):
@@ -76,11 +83,7 @@ class Purchase(TimeStamped):
         self.currency = (self.currency or "").strip().upper()
 
     def _ensure_rate_matches_currency(self):
-        base_currency = (
-            StoreSettings.objects.values_list("base_currency", flat=True).first()
-            or "IRT"
-        )
-        if self.currency == base_currency.upper() and self.exchange_rate != 1:
+        if self.currency == get_base_currency_code() and self.exchange_rate != 1:
             raise ValidationError(
                 {"exchange_rate": "برای ارز پایه‌ی فروشگاه، نرخ ارز باید ۱ باشد."}
             )
@@ -151,7 +154,5 @@ class PurchaseLine(TimeStamped):
 
     @property
     def total_base(self):
-        """مبلغ به ارز پایه، گرد شده تا دو رقم اعشار"""
-        result = self.total * self.purchase.exchange_rate
-
-        return result.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        """مبلغ به ارز پایه، گردشده بر اساس اعشار ارز پایه"""
+        return round_to_base(self.total * self.purchase.exchange_rate)

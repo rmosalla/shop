@@ -6,7 +6,7 @@ from django.db.models import ProtectedError
 from django.test import TestCase
 
 from catalog.models import AttributeDefinition, Category, Product, Variant
-from core.models import Currency, Party, Period
+from core.models import Currency, Party, Period, StoreSettings
 
 from .models import Purchase, PurchaseLine
 
@@ -191,17 +191,30 @@ class PurchaseLineTests(TestCase):
     def test_line_total_base_with_exchange_rate(self):
         line = self.make(purchase=self.fx_purchase, qty=3, unit_price=Decimal("10.10"))
         self.assertEqual(line.total, Decimal("30.30"))
-        self.assertEqual(line.total_base, Decimal("75.75"))
+        self.assertEqual(line.total_base, Decimal("76"))
 
-    def test_line_total_base_rounds_half_up(self):
+    def test_line_total_base_rounds_half_up_to_base_decimals(self):
         purchase = Purchase.objects.create(
             supplier=self.purchase.supplier,
             date=date(2026, 10, 7),
             currency="AED",
             exchange_rate=Decimal("0.5"),
         )
-        line = self.make(purchase=purchase, qty=1, unit_price=Decimal("0.01"))
-        self.assertEqual(line.total_base, Decimal("0.01"))
+        line = self.make(purchase=purchase, qty=1, unit_price=Decimal("3.00"))
+        self.assertEqual(line.total_base, Decimal("2"))
+        self.assertEqual(line.total_base.as_tuple().exponent, 0)
+
+    def test_line_total_base_follows_base_currency_decimals(self):
+        Currency.objects.create(code="TST", name="تست", decimal_places=1)
+        StoreSettings.objects.create(store_name="S", base_currency="TST")
+        purchase = Purchase.objects.create(
+            supplier=self.purchase.supplier,
+            date=date(2026, 10, 7),
+            currency="AED",
+            exchange_rate=Decimal("0.5"),
+        )
+        line = self.make(purchase=purchase, qty=1, unit_price=Decimal("0.30"))
+        self.assertEqual(line.total_base, Decimal("0.2"))
 
     def test_same_variant_twice_in_one_purchase_allowed(self):
         PurchaseLine.objects.create(
@@ -276,6 +289,23 @@ class PurchaseTotalsTests(TestCase):
         )
         self.assertEqual(self.purchase.total, Decimal("25.50"))
         self.assertEqual(self.purchase.total_base, Decimal("63.75"))
+
+    def test_purchase_total_base_sums_rounded_lines(self):
+        create_currencies()
+        PurchaseLine.objects.create(
+            purchase=self.purchase,
+            variant=self.variant,
+            qty=2,
+            unit_price=Decimal("10.00"),
+        )
+        PurchaseLine.objects.create(
+            purchase=self.purchase,
+            variant=self.variant,
+            qty=1,
+            unit_price=Decimal("5.50"),
+        )
+        self.assertEqual(self.purchase.total, Decimal("25.50"))
+        self.assertEqual(self.purchase.total_base, Decimal("64"))
 
 
 class VariantLockedByDocumentsTests(TestCase):

@@ -5,7 +5,16 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 
-from .models import Currency, Party, Period, StoreSettings
+from .models import (
+    Currency,
+    Party,
+    Period,
+    StoreSettings,
+    format_base,
+    get_base_currency,
+    get_base_currency_code,
+    round_to_base,
+)
 
 User = get_user_model()
 
@@ -356,3 +365,63 @@ class CurrencyRoundingTests(TestCase):
     def test_float_input_rejected(self):
         with self.assertRaises(TypeError):
             self.dollar.round(5.1)
+
+
+class CurrencyFormatTests(TestCase):
+    def setUp(self):
+        self.toman = Currency.objects.create(code="IRT", name="تومان", decimal_places=0)
+        self.dollar = Currency.objects.create(code="USD", name="دلار")
+
+    def test_zero_decimals_shows_no_fraction(self):
+        text = self.toman.format_amount(Decimal("1500000.00"))
+        self.assertEqual(text, "1,500,000")
+
+    def test_two_decimals_always_shows_two(self):
+        self.assertEqual(self.dollar.format_amount(Decimal("1250.5")), "1,250.50")
+        self.assertEqual(self.dollar.format_amount(Decimal("1250")), "1,250.00")
+
+    def test_small_numbers_and_zero(self):
+        self.assertEqual(self.toman.format_amount(Decimal("0")), "0")
+        self.assertEqual(self.toman.format_amount(Decimal("999")), "999")
+
+    def test_negative_number(self):
+        text = self.toman.format_amount(Decimal("-1234567"))
+        self.assertEqual(text, "-1,234,567")
+
+    def test_rounds_before_formatting(self):
+        self.assertEqual(self.toman.format_amount(Decimal("1500.5")), "1,501")
+
+
+class BaseCurrencyHelpersTests(TestCase):
+    def test_code_defaults_to_irt_without_settings(self):
+        self.assertEqual(get_base_currency_code(), "IRT")
+
+    def test_code_comes_from_store_settings_in_uppercase(self):
+        StoreSettings.objects.create(store_name="S", base_currency="iqd")
+        self.assertEqual(get_base_currency_code(), "IQD")
+
+    def test_base_currency_is_none_when_not_defined(self):
+        self.assertIsNone(get_base_currency())
+
+    def test_base_currency_returns_the_record(self):
+        toman = Currency.objects.create(code="IRT", name="تومان", decimal_places=0)
+        self.assertEqual(get_base_currency(), toman)
+
+    def test_round_to_base_uses_currency_decimals(self):
+        Currency.objects.create(code="IRT", name="تومان", decimal_places=0)
+        self.assertEqual(round_to_base(Decimal("1.5")), Decimal("2"))
+        self.assertEqual(round_to_base(Decimal("1.4")), Decimal("1"))
+
+    def test_round_to_base_falls_back_to_two_decimals(self):
+        self.assertEqual(round_to_base(Decimal("0.125")), Decimal("0.13"))
+
+    def test_round_to_base_rejects_float(self):
+        with self.assertRaises(TypeError):
+            round_to_base(1.5)
+
+    def test_format_base_with_currency(self):
+        Currency.objects.create(code="IRT", name="تومان", decimal_places=0)
+        self.assertEqual(format_base(Decimal("1500000")), "1,500,000")
+
+    def test_format_base_falls_back_to_two_decimals(self):
+        self.assertEqual(format_base(Decimal("1500000")), "1,500,000.00")

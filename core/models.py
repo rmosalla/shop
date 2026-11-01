@@ -72,6 +72,10 @@ class Currency(TimeStamped):
             raise TypeError("مبلغ را به‌صورت Decimal بدهید، نه float.")
         return Decimal(amount).quantize(self.quantum, rounding=ROUND_HALF_UP)
 
+    def format_amount(self, amount):
+        """مبلغ را با جداکننده‌ی هزارگان و اعشار این ارز نشان می‌دهد."""
+        return f"{self.round(amount):,.{self.decimal_places}f}"
+
 
 class Party(TimeStamped):
     """طرف حساب: تأمین‌کننده، مشتری، شریک، فروشنده."""
@@ -257,3 +261,32 @@ class Period(TimeStamped):
             if overlapping.exists():
                 other = overlapping.first()
                 raise ValidationError(f"این دوره با دوره «{other}»هم‌پوشانی دارد ")
+
+
+def get_base_currency_code():
+    """کد ارز پایه‌ی فروشگاه (اگر تنظیماتی ثبت نشده باشد IRT)."""
+    code = StoreSettings.objects.values_list("base_currency", flat=True).first()
+    return (code or "IRT").strip().upper()
+
+
+def get_base_currency():
+    """رکورد ارز پایه در جدول ارزها، یا None اگر تعریف نشده باشد."""
+    return Currency.objects.filter(code=get_base_currency_code()).first()
+
+
+def round_to_base(amount):
+    """مبلغ را بر اساس اعشار ارز پایه گرد می‌کند (نیم به بالا)."""
+    if isinstance(amount, float):
+        raise TypeError("مبلغ را به‌صورت Decimal بدهید، نه float.")
+    currency = get_base_currency()
+    if currency is None:
+        return Decimal(amount).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return currency.round(amount)
+
+
+def format_base(amount):
+    """مبلغ پایه را برای نمایش آماده می‌کند."""
+    currency = get_base_currency()
+    if currency is None:
+        return f"{amount:,.2f}"
+    return currency.format_amount(amount)
