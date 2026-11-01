@@ -80,3 +80,13 @@ class CurrencyAdmin(admin.ModelAdmin):
     list_display = ("code", "name", "symbol", "decimal_places", "is_active")
     list_filter = ("is_active",)
     search_fields = ("code", "name")
+
+    def get_readonly_fields(self, request, obj=None):
+        if obj is not None and obj.is_in_use():
+            return ("code", "decimal_places")
+        return ()
+
+    def has_delete_permission(self, request, obj=None):
+        if obj is not None and obj.is_in_use():
+            return False
+        return super().has_delete_permission(request, obj)

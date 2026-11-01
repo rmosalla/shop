@@ -382,3 +382,53 @@ class VariantLockedByDocumentsTests(TestCase):
     def test_used_variant_unchanged_passes_full_clean(self):
         self.use_variant()
         self.variant.full_clean()
+
+
+class CurrencyLockWithPurchasesTests(TestCase):
+    def setUp(self):
+        create_currencies()
+        self.supplier = Party.objects.create(name="Supplier A", is_supplier=True)
+
+    def buy(self, currency, rate):
+        return Purchase.objects.create(
+            supplier=self.supplier,
+            date=date(2026, 10, 5),
+            currency=currency,
+            exchange_rate=rate,
+        )
+
+    def test_currency_used_by_purchase_is_in_use(self):
+        self.buy("USD", Decimal("100000"))
+        self.assertTrue(Currency.objects.get(code="USD").is_in_use())
+
+    def test_unused_foreign_currency_is_not_in_use(self):
+        self.buy("USD", Decimal("100000"))
+        self.assertFalse(Currency.objects.get(code="AED").is_in_use())
+
+    def test_used_currency_decimals_are_locked(self):
+        self.buy("USD", Decimal("100000"))
+        usd = Currency.objects.get(code="USD")
+        usd.decimal_places = 0
+        with self.assertRaises(ValidationError):
+            usd.save()
+
+    def test_base_currency_in_use_after_any_purchase(self):
+        self.buy("USD", Decimal("100000"))
+        self.assertTrue(Currency.objects.get(code="IRT").is_in_use())
+
+    def test_base_currency_not_in_use_without_purchases(self):
+        self.assertFalse(Currency.objects.get(code="IRT").is_in_use())
+
+    def test_base_currency_setting_locked_after_first_purchase(self):
+        store = StoreSettings.objects.create(store_name="S")
+        self.buy("IRT", Decimal("1"))
+        store.base_currency = "USD"
+        with self.assertRaises(ValidationError):
+            store.save()
+
+    def test_base_currency_setting_free_before_first_purchase(self):
+        store = StoreSettings.objects.create(store_name="S")
+        store.base_currency = "USD"
+        store.save()
+        store.refresh_from_db()
+        self.assertEqual(store.base_currency, "USD")

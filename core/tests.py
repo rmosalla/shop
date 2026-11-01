@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
@@ -10,10 +11,13 @@ from .models import (
     Party,
     Period,
     StoreSettings,
+    any_documents_exist,
     currency_choices,
+    currency_in_use,
     format_base,
     get_base_currency,
     get_base_currency_code,
+    register_document_source,
     round_to_base,
 )
 
@@ -477,3 +481,184 @@ class CurrencyChoicesTests(TestCase):
     def test_choice_label_contains_name_and_code(self):
         Currency.objects.create(code="USD", name="دلار")
         self.assertEqual(currency_choices(), [("USD", "دلار (USD)")])
+
+
+def sources(has_documents=False, used_codes=()):
+    """منبع ساختگی سند، برای آزمایش قفل‌ها بدون وابستگی به اپ‌های دیگر."""
+    return {"fake": (lambda: has_documents, lambda code: code in used_codes)}
+
+
+class DocumentRegistryTests(TestCase):
+    def test_no_sources_means_no_documents(self):
+        with patch("core.models._document_sources", {}):
+            self.assertFalse(any_documents_exist())
+            self.assertFalse(currency_in_use("USD"))
+
+    def test_registered_source_is_consulted(self):
+        with patch("core.models._document_sources", {}):
+            register_document_source("x", lambda: True, lambda code: False)
+            self.assertTrue(any_documents_exist())
+
+    def test_registering_same_name_twice_keeps_one_source(self):
+        with patch("core.models._document_sources", {}) as registry:
+            register_document_source("x", lambda: False, lambda code: False)
+            register_document_source("x", lambda: True, lambda code: False)
+            self.assertEqual(len(registry), 1)
+            self.assertTrue(any_documents_exist())
+
+    def test_currency_in_use_by_a_source(self):
+        registry = sources(used_codes=("USD",))
+        with patch("core.models._document_sources", registry):
+            self.assertTrue(currency_in_use("USD"))
+            self.assertFalse(currency_in_use("EUR"))
+
+    def test_currency_check_ignores_case(self):
+        registry = sources(used_codes=("USD",))
+        with patch("core.models._document_sources", registry):
+            self.assertTrue(currency_in_use("usd"))
+
+    def test_base_currency_is_in_use_when_any_document_exists(self):
+        registry = sources(has_documents=True)
+        with patch("core.models._document_sources", registry):
+            self.assertTrue(currency_in_use("IRT"))
+            self.assertFalse(currency_in_use("USD"))
+
+
+class CurrencyLockTests(TestCase):
+    def setUp(self):
+        self.usd = Currency.objects.create(code="USD", name="دلار")
+        self.irt = Currency.objects.create(code="IRT", name="تومان", decimal_places=0)
+
+    def used(self):
+        return patch("core.models._document_sources", sources(used_codes=("USD",)))
+
+    def unused(self):
+        return patch("core.models._document_sources", sources())
+
+    def test_unused_currency_can_change_decimals(self):
+        with self.unused():
+            self.usd.decimal_places = 0
+            self.usd.save()
+        self.usd.refresh_from_db()
+        self.assertEqual(self.usd.decimal_places, 0)
+
+    def test_unused_currency_can_change_code(self):
+        with self.unused():
+            self.usd.code = "EUR"
+            self.usd.save()
+        self.usd.refresh_from_db()
+        self.assertEqual(self.usd.code, "EUR")
+
+    def test_used_currency_decimals_cannot_change_on_save(self):
+        with self.used():
+            self.usd.decimal_places = 0
+            with self.assertRaises(ValidationError):
+                self.usd.save()
+        self.usd.refresh_from_db()
+        self.assertEqual(self.usd.decimal_places, 2)
+
+    def test_used_currency_decimals_cannot_change_in_clean(self):
+        with self.used():
+            self.usd.decimal_places = 0
+            with self.assertRaises(ValidationError):
+                self.usd.full_clean()
+
+    def test_used_currency_code_cannot_change(self):
+        with self.used():
+            self.usd.code = "EUR"
+            with self.assertRaises(ValidationError):
+                self.usd.save()
+        self.usd.refresh_from_db()
+        self.assertEqual(self.usd.code, "USD")
+
+    def test_used_currency_name_and_symbol_can_change(self):
+        with self.used():
+            self.usd.name = "دلار آمریکا"
+            self.usd.symbol = "$"
+            self.usd.save()
+        self.usd.refresh_from_db()
+        self.assertEqual(self.usd.name, "دلار آمریکا")
+        self.assertEqual(self.usd.symbol, "$")
+
+    def test_used_currency_can_be_deactivated(self):
+        with self.used():
+            self.usd.is_active = False
+            self.usd.save()
+        self.usd.refresh_from_db()
+        self.assertFalse(self.usd.is_active)
+
+    def test_used_currency_unchanged_passes_full_clean(self):
+        with self.used():
+            self.usd.full_clean()
+
+    def test_unused_currency_can_be_deleted(self):
+        with self.unused():
+            self.usd.delete()
+        self.assertFalse(Currency.objects.filter(code="USD").exists())
+
+    def test_used_currency_cannot_be_deleted(self):
+        with self.used():
+            with self.assertRaises(ValidationError):
+                self.usd.delete()
+        self.assertTrue(Currency.objects.filter(code="USD").exists())
+
+    def test_base_currency_decimals_locked_when_any_document_exists(self):
+        with patch("core.models._document_sources", sources(has_documents=True)):
+            self.irt.decimal_places = 2
+            with self.assertRaises(ValidationError):
+                self.irt.save()
+
+    def test_base_currency_decimals_free_without_documents(self):
+        with self.unused():
+            self.irt.decimal_places = 2
+            self.irt.save()
+        self.irt.refresh_from_db()
+        self.assertEqual(self.irt.decimal_places, 2)
+
+    def test_base_currency_cannot_be_deactivated(self):
+        self.irt.is_active = False
+        with self.assertRaises(ValidationError):
+            self.irt.full_clean()
+
+    def test_non_base_currency_can_be_deactivated_in_clean(self):
+        self.usd.is_active = False
+        self.usd.full_clean()
+
+
+class StoreSettingsBaseCurrencyLockTests(TestCase):
+    def setUp(self):
+        Currency.objects.create(code="IRT", name="تومان", decimal_places=0)
+        Currency.objects.create(code="IQD", name="دینار عراق")
+        self.store = StoreSettings.objects.create(store_name="S")
+
+    def test_base_currency_can_change_without_documents(self):
+        with patch("core.models._document_sources", sources()):
+            self.store.base_currency = "IQD"
+            self.store.save()
+        self.store.refresh_from_db()
+        self.assertEqual(self.store.base_currency, "IQD")
+
+    def test_base_currency_cannot_change_after_documents_on_save(self):
+        with patch("core.models._document_sources", sources(has_documents=True)):
+            self.store.base_currency = "IQD"
+            with self.assertRaises(ValidationError):
+                self.store.save()
+        self.store.refresh_from_db()
+        self.assertEqual(self.store.base_currency, "IRT")
+
+    def test_base_currency_cannot_change_after_documents_in_clean(self):
+        with patch("core.models._document_sources", sources(has_documents=True)):
+            self.store.base_currency = "IQD"
+            with self.assertRaises(ValidationError):
+                self.store.full_clean()
+
+    def test_other_fields_can_change_after_documents(self):
+        with patch("core.models._document_sources", sources(has_documents=True)):
+            self.store.store_name = "New name"
+            self.store.save()
+        self.store.refresh_from_db()
+        self.assertEqual(self.store.store_name, "New name")
+
+    def test_same_base_currency_passes_clean_after_documents(self):
+        with patch("core.models._document_sources", sources(has_documents=True)):
+            self.store.full_clean()

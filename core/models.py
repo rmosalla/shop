@@ -52,11 +52,52 @@ class Currency(TimeStamped):
 
     def save(self, *args, **kwargs):
         self._normalize_code()
+        self._ensure_not_locked()
         super().save(*args, **kwargs)
 
     def clean(self):
         self._normalize_code()
+        self._ensure_not_locked()
+        self._ensure_base_stays_active()
         super().clean()
+
+    def delete(self, *args, **kwargs):
+        if self.is_in_use():
+            raise ValidationError(
+                "ارزی که در سند استفاده شده قابل حذف نیست؛ آن را غیرفعال کنید."
+            )
+        super().delete(*args, **kwargs)
+
+    def is_in_use(self):
+        """آیا ارز (با کدِ ذخیره‌شده در دیتابیس) در سندی استفاده شده است؟"""
+        stored_code = (
+            Currency.objects.filter(pk=self.pk).values_list("code", flat=True).first()
+        )
+        return stored_code is not None and currency_in_use(stored_code)
+
+    def _ensure_not_locked(self):
+        if self.pk is None:
+            return
+        stored = (
+            Currency.objects.filter(pk=self.pk).values("code", "decimal_places").first()
+        )
+        if stored is None or not currency_in_use(stored["code"]):
+            return
+        errors = {}
+        if stored["code"] != self.code:
+            errors["code"] = "کد ارزی که در سند استفاده شده قابل تغییر نیست."
+        if stored["decimal_places"] != self.decimal_places:
+            errors["decimal_places"] = (
+                "تعداد اعشار ارزی که در سند استفاده شده قابل تغییر نیست."
+            )
+        if errors:
+            raise ValidationError(errors)
+
+    def _ensure_base_stays_active(self):
+        if not self.is_active and self.code == get_base_currency_code():
+            raise ValidationError(
+                {"is_active": "ارز پایه‌ی فروشگاه را نمی‌شود غیرفعال کرد."}
+            )
 
     def _normalize_code(self):
         self.code = (self.code or "").strip().upper()
@@ -146,13 +187,30 @@ class StoreSettings(models.Model):
     def save(self, *args, **kwargs):
         self._normalize_base_currency()
         self._ensure_single_instance()
+        self._ensure_base_currency_unchanged()
         super().save(*args, **kwargs)
 
     def clean(self):
         self._normalize_base_currency()
         self._ensure_single_instance()
+        self._ensure_base_currency_unchanged()
         self._ensure_base_currency_is_available()
         super().clean()
+
+    def _ensure_base_currency_unchanged(self):
+        if self.pk is None:
+            return
+        stored = (
+            StoreSettings.objects.filter(pk=self.pk)
+            .values_list("base_currency", flat=True)
+            .first()
+        )
+        if stored is None or stored.strip().upper() == self.base_currency:
+            return
+        if any_documents_exist():
+            raise ValidationError(
+                {"base_currency": "ارز پایه بعد از ثبت اولین سند قابل تغییر نیست."}
+            )
 
     def _normalize_base_currency(self):
         self.base_currency = (self.base_currency or "").strip().upper()
@@ -314,3 +372,26 @@ def format_base(amount):
 def currency_choices():
     """گزینه‌های فهرست کشویی: ارزهای فعال به شکل (کد، نام نمایشی)."""
     return [(c.code, str(c)) for c in Currency.objects.filter(is_active=True)]
+
+
+_document_sources = {}
+
+
+def register_document_source(name, has_documents, uses_currency):
+    """هر اپی که سند مالی می‌سازد خودش را اینجا معرفی می‌کند.
+
+    has_documents(): آیا حتی یک سند وجود دارد؟
+    uses_currency(code): آیا سندی با این ارز وجود دارد؟
+    """
+    _document_sources[name] = (has_documents, uses_currency)
+
+
+def any_documents_exist():
+    return any(has_documents() for has_documents, _ in _document_sources.values())
+
+
+def currency_in_use(code):
+    code = (code or "").strip().upper()
+    if any(uses(code) for _, uses in _document_sources.values()):
+        return True
+    return code == get_base_currency_code() and any_documents_exist()
