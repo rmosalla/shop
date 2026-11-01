@@ -48,6 +48,19 @@ class CategoryTests(TestCase):
         parent = Category.objects.create(name="Accessories")
         Category(name="Mouse", parent=parent).full_clean()
 
+    def test_two_level_cycle_rejected(self):
+        a = Category.objects.create(name="A")
+        b = Category.objects.create(name="B", parent=a)
+        a.parent = b
+        with self.assertRaises(ValidationError):
+            a.full_clean()
+
+    def test_lineage_ids_contains_self_and_ancestors(self):
+        root = Category.objects.create(name="Root")
+        child = Category.objects.create(name="Child", parent=root)
+        grandchild = Category.objects.create(name="Grandchild", parent=child)
+        self.assertEqual(grandchild.lineage_ids(), {root.pk, child.pk, grandchild.pk})
+
 
 class ProductTests(TestCase):
     def setUp(self):
@@ -111,10 +124,6 @@ class VariantTests(TestCase):
         self.assertEqual(v.default_price_base, 0)
         self.assertTrue(v.is_active)
 
-    def test_str_returns_sku(self):
-        v = Variant.objects.create(product=self.product, sku="DELL-5420-A")
-        self.assertEqual(str(v), "DELL-5420-A")
-
     def test_attributes_are_stored_and_loaded(self):
         v = Variant.objects.create(
             product=self.product,
@@ -124,11 +133,9 @@ class VariantTests(TestCase):
         v.refresh_from_db()
         self.assertEqual(v.attributes, {"ram": 16, "ssd": 512})
 
-    def test_duplicate_sku_rejected(self):
-        Variant.objects.create(product=self.product, sku="DELL-5420-A")
-        second = Variant(product=self.product, sku="DELL-5420-A")
-        with self.assertRaises(ValidationError):
-            second.full_clean()
+    def test_str_returns_sku(self):
+        v = Variant.objects.create(product=self.product)
+        self.assertEqual(str(v), "DELL-LATITUDE-5420")
 
     def test_negative_price_rejected(self):
         v = Variant(product=self.product, sku="x", default_price_base=-1)
@@ -181,10 +188,6 @@ class VariantSkuTests(TestCase):
         v = Variant.objects.create(product=self.product, attributes={"cpu": "Core i7"})
         self.assertEqual(v.sku, "DELL-LATITUDE-5420-CORE-I7")
 
-    def test_explicit_sku_is_kept(self):
-        v = Variant.objects.create(product=self.product, sku="CUSTOM-1")
-        self.assertEqual(v.sku, "CUSTOM-1")
-
     def test_duplicate_generated_sku_gets_numeric_suffix(self):
         other = Product.objects.create(
             category=self.category, brand="Dell", model_name="Latitude 5420"
@@ -198,14 +201,6 @@ class VariantSkuTests(TestCase):
         self.assertEqual(first.sku, "DELL-LATITUDE-5420")
         self.assertEqual(second.sku, "DELL-LATITUDE-5420-2")
         self.assertEqual(third.sku, "DELL-LATITUDE-5420-3")
-
-    def test_sku_does_not_change_when_attributes_change(self):
-        v = Variant.objects.create(product=self.product, attributes={"ram": 16})
-        old_sku = v.sku
-        v.attributes = {"ram": 32}
-        v.save()
-        v.refresh_from_db()
-        self.assertEqual(v.sku, old_sku)
 
     def test_non_latin_name_falls_back_to_product_id(self):
         product = Product.objects.create(category=self.category, model_name="لپ‌تاپ")
@@ -228,6 +223,37 @@ class VariantSkuTests(TestCase):
     def test_blank_sku_is_allowed_in_full_clean(self):
         v = Variant(product=self.product, attributes={})
         v.full_clean()
+
+    def test_explicit_sku_is_ignored(self):
+        v = Variant.objects.create(product=self.product, sku="CUSTOM-1")
+        self.assertEqual(v.sku, "DELL-LATITUDE-5420")
+
+    def test_sku_follows_attribute_changes(self):
+        v = Variant.objects.create(product=self.product, attributes={"ram": 16})
+        self.assertEqual(v.sku, "DELL-LATITUDE-5420-16")
+        v.attributes = {"ram": 32}
+        v.save()
+        self.assertEqual(v.sku, "DELL-LATITUDE-5420-32")
+
+    def test_sku_stays_stable_when_saved_again(self):
+        other = Product.objects.create(
+            category=self.category, brand="Dell", model_name="Latitude 5420"
+        )
+        Variant.objects.create(product=self.product)
+        second = Variant.objects.create(product=other)
+        self.assertEqual(second.sku, "DELL-LATITUDE-5420-2")
+        second.save()
+        self.assertEqual(second.sku, "DELL-LATITUDE-5420-2")
+
+    def test_other_text_is_added_at_the_end(self):
+        v = Variant.objects.create(
+            product=self.product,
+            attributes={"other": "refurbished", "ram": 16},
+        )
+        self.assertEqual(v.sku, "DELL-LATITUDE-5420-16-REFURBISHED")
+
+    def test_sku_field_is_not_editable(self):
+        self.assertFalse(Variant._meta.get_field("sku").editable)
 
 
 class VariantUniquenessTests(TestCase):
@@ -455,3 +481,38 @@ class VariantAttributeValidationTests(TestCase):
         )
         with self.assertRaises(ValidationError):
             v.full_clean()
+
+
+class AttributeCategoryTests(TestCase):
+    def setUp(self):
+        self.laptops = Category.objects.create(name="Laptop")
+        self.gaming = Category.objects.create(name="Gaming", parent=self.laptops)
+        self.mice = Category.objects.create(name="Mouse")
+        self.laptop = Product.objects.create(category=self.laptops, model_name="X1")
+        self.gaming_laptop = Product.objects.create(
+            category=self.gaming, model_name="G15"
+        )
+        self.mouse = Product.objects.create(category=self.mice, model_name="FStyler")
+        ValueType = AttributeDefinition.ValueType
+        ram = AttributeDefinition.objects.create(
+            key="ram", label="رم", value_type=ValueType.NUMBER
+        )
+        ram.categories.add(self.laptops)
+        AttributeDefinition.objects.create(
+            key="color", label="رنگ", value_type=ValueType.TEXT
+        )
+
+    def test_restricted_attribute_accepted_in_its_own_category(self):
+        Variant(product=self.laptop, attributes={"ram": 16}).full_clean()
+
+    def test_restricted_attribute_accepted_in_child_category(self):
+        Variant(product=self.gaming_laptop, attributes={"ram": 16}).full_clean()
+
+    def test_restricted_attribute_rejected_in_other_category(self):
+        with self.assertRaises(ValidationError):
+            Variant(product=self.mouse, attributes={"ram": 16}).full_clean()
+
+    def test_unrestricted_attribute_accepted_everywhere(self):
+        for product in [self.laptop, self.gaming_laptop, self.mouse]:
+            with self.subTest(product=product):
+                Variant(product=product, attributes={"color": "black"}).full_clean()

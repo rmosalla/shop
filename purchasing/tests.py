@@ -5,7 +5,7 @@ from django.core.exceptions import ValidationError
 from django.db.models import ProtectedError
 from django.test import TestCase
 
-from catalog.models import Category, Product, Variant
+from catalog.models import AttributeDefinition, Category, Product, Variant
 from core.models import Party, Period
 
 from .models import Purchase, PurchaseLine
@@ -130,7 +130,7 @@ class PurchaseLineTests(TestCase):
         self.assertEqual(line.qty, 1)
 
     def test_str(self):
-        self.assertEqual(str(self.make()), "DELL-5420-A x 2")
+        self.assertEqual(str(self.make()), f"{self.variant.sku} x 2")
 
     def test_zero_or_negative_qty_rejected(self):
         for qty in [0, -1]:
@@ -233,3 +233,79 @@ class PurchaseTotalsTests(TestCase):
         )
         self.assertEqual(self.purchase.total, Decimal("25.50"))
         self.assertEqual(self.purchase.total_base, Decimal("63.75"))
+
+
+class VariantLockedByDocumentsTests(TestCase):
+    def setUp(self):
+        supplier = Party.objects.create(name="Supplier A", is_supplier=True)
+        category = Category.objects.create(name="Laptop")
+        self.product = Product.objects.create(
+            category=category, brand="Dell", model_name="Latitude 5420"
+        )
+        self.other_product = Product.objects.create(
+            category=category, brand="HP", model_name="EliteBook"
+        )
+        AttributeDefinition.objects.create(
+            key="ram", label="رم", value_type=AttributeDefinition.ValueType.NUMBER
+        )
+        self.variant = Variant.objects.create(
+            product=self.product, attributes={"ram": 16}
+        )
+        self.purchase = Purchase.objects.create(
+            supplier=supplier, date=date(2026, 10, 5)
+        )
+
+    def use_variant(self):
+        PurchaseLine.objects.create(
+            purchase=self.purchase, variant=self.variant, unit_price=Decimal("10")
+        )
+
+    def test_unused_variant_has_no_documents(self):
+        self.assertFalse(self.variant.has_documents())
+
+    def test_variant_with_purchase_line_has_documents(self):
+        self.use_variant()
+        self.assertTrue(self.variant.has_documents())
+
+    def test_unused_variant_can_change_and_sku_follows(self):
+        self.variant.attributes = {"ram": 32}
+        self.variant.save()
+        self.variant.refresh_from_db()
+        self.assertEqual(self.variant.sku, "DELL-LATITUDE-5420-32")
+
+    def test_used_variant_attributes_cannot_change_on_save(self):
+        self.use_variant()
+        self.variant.attributes = {"ram": 32}
+        with self.assertRaises(ValidationError):
+            self.variant.save()
+
+    def test_used_variant_attributes_cannot_change_in_clean(self):
+        self.use_variant()
+        self.variant.attributes = {"ram": 32}
+        with self.assertRaises(ValidationError):
+            self.variant.full_clean()
+
+    def test_used_variant_product_cannot_change(self):
+        self.use_variant()
+        self.variant.product = self.other_product
+        with self.assertRaises(ValidationError):
+            self.variant.save()
+
+    def test_used_variant_sku_ignores_in_memory_change(self):
+        self.use_variant()
+        old_sku = self.variant.sku
+        self.variant.sku = "HACK"
+        self.variant.save()
+        self.variant.refresh_from_db()
+        self.assertEqual(self.variant.sku, old_sku)
+
+    def test_used_variant_price_can_change(self):
+        self.use_variant()
+        self.variant.default_price_base = Decimal("2000000")
+        self.variant.save()
+        self.variant.refresh_from_db()
+        self.assertEqual(self.variant.default_price_base, Decimal("2000000"))
+
+    def test_used_variant_unchanged_passes_full_clean(self):
+        self.use_variant()
+        self.variant.full_clean()

@@ -28,9 +28,26 @@ class Category(TimeStamped):
     def __str__(self):
         return self.name
 
+    def lineage_ids(self):
+        """شناسه‌ی این دسته و همه‌ی والدهایش تا ریشه."""
+        ids = set()
+        current = self
+        while current is not None and current.pk not in ids:
+            ids.add(current.pk)
+            current = current.parent
+        return ids
+
     def clean(self):
-        if self.pk is not None and self.pk == self.parent_id:
-            raise ValidationError("یک دسته نمی‌تواند والد خودش باشد")
+        parent = self.parent
+        if self.pk is not None and parent is not None:
+            if self.pk in parent.lineage_ids():
+                raise ValidationError(
+                    {
+                        "parent": (
+                            "دسته‌ی والد نمی‌تواند خود دسته یا یکی از زیردسته‌هایش باشد"
+                        )
+                    }
+                )
         super().clean()
 
 
@@ -87,10 +104,11 @@ class Variant(TimeStamped):
     )
     sku = models.CharField(
         max_length=80,
-        blank=True,
         unique=True,
+        blank=True,
+        editable=False,
         verbose_name="کد یکتا",
-        help_text="اگر خالی بماند خودکار ساخته می‌شود",
+        help_text="خودکار از روی کالا و مشخصات ساخته می‌شود",
     )
     attributes = models.JSONField(default=dict, blank=True, verbose_name="مشخصات")
     attributes_key = models.CharField(
@@ -123,8 +141,11 @@ class Variant(TimeStamped):
         return self.sku
 
     def save(self, *args, **kwargs):
+        self._ensure_not_locked()
         self.attributes_key = self._build_attributes_key()
-        if not self.sku:
+        if self.has_documents():
+            self.sku = Variant.objects.values_list("sku", flat=True).get(pk=self.pk)
+        else:
             self.sku = self._generate_sku()
         super().save(*args, **kwargs)
 
@@ -133,6 +154,7 @@ class Variant(TimeStamped):
             raise ValidationError(
                 {"attributes": "این فیلد باید یک دیکشنری (dict) باشد."}
             )
+        self._ensure_not_locked()
         self._validate_attributes()
         self.attributes_key = self._build_attributes_key()
         if self.product_id is not None:
@@ -144,14 +166,37 @@ class Variant(TimeStamped):
                 raise ValidationError("این مدل با این مشخصات قبلاً ثبت شده است")
         super().clean()
 
-    def _build_attributes_key(self):
-        parts = []
-        for key, value in sorted(self.attributes.items()):
-            parts.append(f"{key}={value}")
-        return "|".join(parts)
+    def has_documents(self):
+        """آیا هیچ سندی (خرید، فروش و...) به این کانفیگ وصل شده است؟"""
+        if self.pk is None:
+            return False
+        for relation in self._meta.related_objects:
+            if relation.one_to_many:
+                if getattr(self, relation.get_accessor_name()).exists():
+                    return True
+        return False
+
+    def _ensure_not_locked(self):
+        if not self.has_documents():
+            return
+        stored = (
+            Variant.objects.filter(pk=self.pk)
+            .values("product_id", "attributes")
+            .first()
+        )
+        errors = {}
+        if stored["product_id"] != self.product_id:
+            errors["product"] = "کالای یک کانفیگ دارای سند قابل تغییر نیست"
+        if stored["attributes"] != self.attributes:
+            errors["attributes"] = (
+                "مشخصات کانفیگ دارای سند قابل تغییر نیست؛ کانفیگ جدید بسازید"
+            )
+        if errors:
+            raise ValidationError(errors)
 
     def _validate_attributes(self):
         types = AttributeDefinition.ValueType
+        category = self.product.category if self.product_id is not None else None
         definitions = {
             d.key: d
             for d in AttributeDefinition.objects.filter(
@@ -165,6 +210,9 @@ class Variant(TimeStamped):
                 errors.append(f"مشخصه‌ی «{key}» تعریف نشده یا غیرفعال است.")
                 continue
             label = definition.label
+            if not definition.applies_to(category):
+                errors.append(f"مشخصه‌ی «{label}» برای این دسته‌بندی مجاز نیست.")
+                continue
             if definition.value_type == types.NUMBER:
                 if isinstance(value, bool) or not isinstance(value, (int, float)):
                     errors.append(f"مقدار «{label}» باید عدد باشد.")
@@ -178,12 +226,20 @@ class Variant(TimeStamped):
         if errors:
             raise ValidationError({"attributes": errors})
 
+    def _build_attributes_key(self):
+        parts = []
+        for key, value in sorted(self.attributes.items()):
+            parts.append(f"{key}={value}")
+        return "|".join(parts)
+
     def _generate_sku(self):
+        ordered = sorted(
+            self.attributes.items(), key=lambda item: (item[0] == "other", item[0])
+        )
         raw = [self.product.brand, self.product.model_name]
-        raw += [str(v).replace(".", "_") for _, v in sorted(self.attributes.items())]
+        raw += [str(value).replace(".", "_") for _key, value in ordered]
         parts = [slug for slug in (slugify(item) for item in raw) if slug]
         base = "-".join(parts).upper()[:70] or f"P{self.product_id}"
-
         candidate = base
         number = 2
         while Variant.objects.filter(sku=candidate).exclude(pk=self.pk).exists():
@@ -225,6 +281,13 @@ class AttributeDefinition(TimeStamped):
     choices = models.JSONField(default=list, blank=True, verbose_name="گزینه‌ها")
     unit = models.CharField(max_length=20, blank=True, verbose_name="واحد")
     is_active = models.BooleanField(default=True, verbose_name="فعال")
+    categories = models.ManyToManyField(
+        Category,
+        blank=True,
+        related_name="attribute_definitions",
+        verbose_name="دسته‌بندی‌های مجاز",
+        help_text="اگر خالی بماند، برای همه‌ی دسته‌بندی‌ها مجاز است",
+    )
 
     class Meta:
         ordering = ("label",)
@@ -247,3 +310,10 @@ class AttributeDefinition(TimeStamped):
         elif self.choices:
             raise ValidationError({"choices": "این نوع گزینه نمی‌خواهد"})
         super().clean()
+
+    def applies_to(self, category):
+        """آیا این مشخصه برای این دسته (یا والدهایش) مجاز است؟"""
+        allowed = set(self.categories.values_list("pk", flat=True))
+        if not allowed or category is None:
+            return True
+        return bool(allowed & category.lineage_ids())

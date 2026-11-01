@@ -42,6 +42,11 @@ class VariantAdmin(admin.ModelAdmin):
     )
     list_filter = ("is_active",)
 
+    def get_readonly_fields(self, request, obj=None):
+        if obj is not None and obj.has_documents():
+            return ("sku", "product", "attributes")
+        return ("sku",)
+
 
 @admin.register(AttributeDefinition)
 class AttributeDefinitionAdmin(admin.ModelAdmin):
@@ -60,3 +65,4 @@ class AttributeDefinitionAdmin(admin.ModelAdmin):
         "key",
         "label",
     )
+    filter_horizontal = ("categories",)
