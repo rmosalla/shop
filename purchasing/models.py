@@ -26,9 +26,9 @@ class Purchase(TimeStamped):
     currency = models.CharField(default="IRT", max_length=5, verbose_name="ارز")
     exchange_rate = models.DecimalField(
         max_digits=18,
-        decimal_places=6,
+        decimal_places=4,
         default=1,
-        validators=[MinValueValidator(Decimal("0.000001"))],
+        validators=[MinValueValidator(Decimal("0.0001"))],
         verbose_name="نرخ تبدیل",
     )
     status = models.CharField(

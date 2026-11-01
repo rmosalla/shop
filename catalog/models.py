@@ -91,7 +91,7 @@ class Variant(TimeStamped):
     )
     default_price_base = models.DecimalField(
         max_digits=18,
-        decimal_places=3,
+        decimal_places=2,
         default=0,
         verbose_name="قیمت",
         validators=[MinValueValidator(0)],

@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import ProtectedError
@@ -365,3 +367,16 @@ class VariantAttributeValidationTests(TestCase):
 
     def test_empty_attributes_accepted(self):
         self.make({}).full_clean()
+
+    def test_price_with_two_decimals_accepted(self):
+        v = Variant(
+            product=self.product, sku="x", default_price_base=Decimal("1000.50")
+        )
+        v.full_clean()
+
+    def test_price_with_three_decimals_rejected(self):
+        v = Variant(
+            product=self.product, sku="x", default_price_base=Decimal("1000.001")
+        )
+        with self.assertRaises(ValidationError):
+            v.full_clean()

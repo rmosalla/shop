@@ -82,3 +82,10 @@ class PurchaseTests(TestCase):
         p = Purchase(supplier=self.supplier)
         with self.assertRaises(ValidationError):
             p.full_clean()
+
+    def test_rate_with_four_decimals_accepted(self):
+        self.make(currency="IQD", exchange_rate=Decimal("0.0001")).full_clean()
+
+    def test_rate_with_five_decimals_rejected(self):
+        with self.assertRaises(ValidationError):
+            self.make(currency="IQD", exchange_rate=Decimal("0.00001")).full_clean()
