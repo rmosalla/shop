@@ -5,7 +5,7 @@ from django.core.validators import MinValueValidator
 from django.db import models
 
 from catalog.models import Variant
-from core.models import Party, Period, StoreSettings, TimeStamped
+from core.models import Currency, Party, Period, StoreSettings, TimeStamped
 
 
 class Purchase(TimeStamped):
@@ -60,8 +60,17 @@ class Purchase(TimeStamped):
         self._normalize_currency()
         if self.date is not None:
             Period.assert_date_open(self.date)
+        self._ensure_currency_is_available()
         self._ensure_rate_matches_currency()
         super().clean()
+
+    def get_currency(self):
+        """رکورد ارز این فاکتور در جدول ارزها (یا None)."""
+        return Currency.objects.filter(code=self.currency).first()
+
+    def _ensure_currency_is_available(self):
+        if not Currency.objects.filter(code=self.currency, is_active=True).exists():
+            raise ValidationError({"currency": "این ارز تعریف نشده یا غیرفعال است."})
 
     def _normalize_currency(self):
         self.currency = (self.currency or "").strip().upper()
@@ -117,6 +126,23 @@ class PurchaseLine(TimeStamped):
 
     def __str__(self):
         return f"{self.variant.sku} x {self.qty}"
+
+    def clean(self):
+        if self.purchase_id is not None and isinstance(self.unit_price, Decimal):
+            currency = self.purchase.get_currency()
+            if (
+                currency is not None
+                and currency.round(self.unit_price) != self.unit_price
+            ):
+                raise ValidationError(
+                    {
+                        "unit_price": (
+                            f"ارز {currency.code} حداکثر "
+                            f"{currency.decimal_places} رقم اعشار دارد."
+                        )
+                    }
+                )
+        super().clean()
 
     @property
     def total(self):

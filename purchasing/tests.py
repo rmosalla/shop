@@ -6,13 +6,21 @@ from django.db.models import ProtectedError
 from django.test import TestCase
 
 from catalog.models import AttributeDefinition, Category, Product, Variant
-from core.models import Party, Period
+from core.models import Currency, Party, Period
 
 from .models import Purchase, PurchaseLine
 
 
+def create_currencies():
+    Currency.objects.create(code="IRT", name="تومان", decimal_places=0)
+    Currency.objects.create(code="USD", name="دلار")
+    Currency.objects.create(code="AED", name="درهم")
+    Currency.objects.create(code="IQD", name="دینار عراق")
+
+
 class PurchaseTests(TestCase):
     def setUp(self):
+        create_currencies()
         self.supplier = Party.objects.create(name="Supplier A", is_supplier=True)
         self.customer = Party.objects.create(name="Customer B", is_customer=True)
 
@@ -91,9 +99,26 @@ class PurchaseTests(TestCase):
         with self.assertRaises(ValidationError):
             self.make(currency="IQD", exchange_rate=Decimal("0.00001")).full_clean()
 
+    def test_unknown_currency_rejected(self):
+        with self.assertRaises(ValidationError):
+            self.make(currency="XYZ").full_clean()
+
+    def test_inactive_currency_rejected(self):
+        Currency.objects.filter(code="USD").update(is_active=False)
+        with self.assertRaises(ValidationError):
+            self.make(currency="USD", exchange_rate=Decimal("100000")).full_clean()
+
+    def test_lowercase_currency_accepted(self):
+        self.make(currency="usd", exchange_rate=Decimal("100000")).full_clean()
+
+    def test_blank_currency_rejected(self):
+        with self.assertRaises(ValidationError):
+            self.make(currency="").full_clean()
+
 
 class PurchaseLineTests(TestCase):
     def setUp(self):
+        create_currencies()
         supplier = Party.objects.create(name="Supplier A", is_supplier=True)
         category = Category.objects.create(name="Laptop")
         product = Product.objects.create(
@@ -199,6 +224,24 @@ class PurchaseLineTests(TestCase):
         self.make().save()
         self.purchase.delete()
         self.assertEqual(PurchaseLine.objects.count(), 0)
+
+    def test_zero_decimal_currency_rejects_fractional_price(self):
+        with self.assertRaises(ValidationError):
+            self.make(unit_price=Decimal("1500000.50")).full_clean()
+
+    def test_zero_decimal_currency_accepts_whole_price_with_trailing_zeros(self):
+        self.make(unit_price=Decimal("1500000.00")).full_clean()
+
+    def test_two_decimal_currency_accepts_two_decimals(self):
+        self.make(purchase=self.fx_purchase, unit_price=Decimal("10.55")).full_clean()
+
+    def test_unknown_purchase_currency_is_left_to_the_purchase_validation(self):
+        purchase = Purchase.objects.create(
+            supplier=self.purchase.supplier,
+            date=date(2026, 10, 8),
+            currency="XYZ",
+        )
+        self.make(purchase=purchase).full_clean()
 
 
 class PurchaseTotalsTests(TestCase):
