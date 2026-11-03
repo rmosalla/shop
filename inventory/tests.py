@@ -9,7 +9,7 @@ from catalog.models import Category, Product, Variant
 from core.models import Party
 from purchasing.models import Purchase, PurchaseLine
 
-from .models import Unit
+from .models import Unit, UnitOwnership
 
 
 class UnitTests(TestCase):
@@ -204,3 +204,69 @@ class UnitTests(TestCase):
     def test_variant_with_units_counts_as_used(self):
         self.create()
         self.assertTrue(self.variant.has_documents())
+
+    def test_unit_ownership_valid(self):
+        unit = self.create()
+        owner = Party.objects.create(name="Owner", is_owner=True)
+        UnitOwnership(unit=unit, party=owner, share_percent=Decimal("100")).full_clean()
+
+    def test_supplier_cannot_own_a_unit(self):
+        unit = self.create()
+        supplier = self.purchase.supplier
+        with self.assertRaises(ValidationError):
+            UnitOwnership(
+                unit=unit, party=supplier, share_percent=Decimal("50")
+            ).full_clean()
+
+    def test_unit_share_range(self):
+        unit = self.create()
+        partner = Party.objects.create(name="Partner", is_partner=True)
+        for value in ["0", "100.01"]:
+            with self.subTest(value=value):
+                with self.assertRaises(ValidationError):
+                    UnitOwnership(
+                        unit=unit, party=partner, share_percent=Decimal(value)
+                    ).full_clean()
+
+    def test_duplicate_party_on_same_unit_rejected(self):
+        unit = self.create()
+        partner = Party.objects.create(name="Partner", is_partner=True)
+        UnitOwnership.objects.create(
+            unit=unit, party=partner, share_percent=Decimal("30")
+        )
+        second = UnitOwnership(unit=unit, party=partner, share_percent=Decimal("20"))
+        with self.assertRaises(ValidationError):
+            second.full_clean()
+
+    def test_ownership_total_sums_shares(self):
+        unit = self.create()
+        owner = Party.objects.create(name="Owner", is_owner=True)
+        partner = Party.objects.create(name="Partner", is_partner=True)
+        UnitOwnership.objects.create(
+            unit=unit, party=owner, share_percent=Decimal("60")
+        )
+        UnitOwnership.objects.create(
+            unit=unit, party=partner, share_percent=Decimal("40")
+        )
+        self.assertEqual(unit.ownership_total, Decimal("100"))
+
+    def test_ownership_total_is_zero_without_shares(self):
+        self.assertEqual(self.create().ownership_total, Decimal("0"))
+
+    def test_deleting_unit_deletes_its_shares(self):
+        unit = self.create()
+        partner = Party.objects.create(name="Partner", is_partner=True)
+        UnitOwnership.objects.create(
+            unit=unit, party=partner, share_percent=Decimal("100")
+        )
+        unit.delete()
+        self.assertEqual(UnitOwnership.objects.count(), 0)
+
+    def test_cannot_delete_party_with_unit_shares(self):
+        unit = self.create()
+        partner = Party.objects.create(name="Partner", is_partner=True)
+        UnitOwnership.objects.create(
+            unit=unit, party=partner, share_percent=Decimal("100")
+        )
+        with self.assertRaises(ProtectedError):
+            partner.delete()

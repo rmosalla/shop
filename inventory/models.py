@@ -5,7 +5,7 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models, transaction
 
 from catalog.models import Product, Variant
-from core.models import TimeStamped
+from core.models import Party, TimeStamped
 from purchasing.models import PurchaseLine
 
 
@@ -153,3 +153,51 @@ class Unit(TimeStamped):
         if self.asking_price_base is not None:
             return self.asking_price_base
         return self.variant.default_price_base
+
+    @property
+    def ownership_total(self):
+        """مجموع سهم‌های ثبت‌شده برای این دستگاه (باید ۱۰۰ باشد)."""
+        return sum((row.share_percent for row in self.ownerships.all()), Decimal("0"))
+
+
+class UnitOwnership(TimeStamped):
+    """سهم یک شخص از یک دستگاه مشخص."""
+
+    unit = models.ForeignKey(
+        Unit,
+        on_delete=models.CASCADE,
+        related_name="ownerships",
+        verbose_name="دستگاه",
+    )
+    party = models.ForeignKey(
+        Party,
+        on_delete=models.PROTECT,
+        related_name="unit_ownerships",
+        verbose_name="شخص",
+    )
+    share_percent = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0.01")), MaxValueValidator(100)],
+        verbose_name="سهم (٪)",
+    )
+
+    class Meta:
+        ordering = ("id",)
+        constraints = (
+            models.UniqueConstraint(
+                fields=("unit", "party"), name="uniq_unit_ownership_party"
+            ),
+        )
+        verbose_name = "سهم دستگاه"
+        verbose_name_plural = "سهم‌های دستگاه"
+
+    def __str__(self):
+        return f"{self.party.name}: {self.share_percent}%"
+
+    def clean(self):
+        if self.party_id is not None and not self.party.can_own:
+            raise ValidationError(
+                {"party": "فقط صاحب فروشگاه یا شریک می‌تواند سهم داشته باشد."}
+            )
+        super().clean()

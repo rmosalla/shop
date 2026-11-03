@@ -129,7 +129,7 @@ class Party(TimeStamped):
     is_customer = models.BooleanField(default=False, verbose_name="خریدار")
     is_partner = models.BooleanField(default=False, verbose_name="شریک")
     is_seller = models.BooleanField(default=False, verbose_name="فروشنده")
-
+    is_owner = models.BooleanField(default=False, verbose_name="صاحب فروشگاه")
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         null=True,
@@ -144,6 +144,26 @@ class Party(TimeStamped):
 
     def __str__(self):
         return self.name
+
+    def save(self, *args, **kwargs):
+        self._ensure_single_owner()
+        super().save(*args, **kwargs)
+
+    def clean(self):
+        self._ensure_single_owner()
+        super().clean()
+
+    def _ensure_single_owner(self):
+        if (
+            self.is_owner
+            and Party.objects.filter(is_owner=True).exclude(pk=self.pk).exists()
+        ):
+            raise ValidationError({"is_owner": "فقط یک نفر می‌تواند صاحب فروشگاه باشد."})
+
+    @property
+    def can_own(self):
+        """آیا می‌تواند در سود یک دستگاه سهم داشته باشد؟"""
+        return self.is_owner or self.is_partner
 
 
 class StoreSettings(models.Model):

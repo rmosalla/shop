@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
-from django.core.validators import MinValueValidator
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 from catalog.models import Variant
@@ -147,6 +147,23 @@ class PurchaseLine(TimeStamped):
                 )
         super().clean()
 
+    def resolve_ownership(self):
+        """فهرست (شخص، درصد) سهم‌ها. اگر چیزی ثبت نشده باشد ۱۰۰٪ صاحب فروشگاه."""
+        rows = list(self.ownerships.select_related("party"))
+        if rows:
+            total = sum((row.share_percent for row in rows), Decimal("0"))
+            if total != Decimal("100"):
+                raise ValidationError(
+                    f"مجموع سهم‌های ردیف باید ۱۰۰ باشد (الان {total} است)."
+                )
+            return [(row.party, row.share_percent) for row in rows]
+        owners = list(Party.objects.filter(is_owner=True)[:2])
+        if len(owners) != 1:
+            raise ValidationError(
+                "برای سهم پیش‌فرض باید دقیقاً یک نفر به‌عنوان صاحب فروشگاه تعریف شده باشد."
+            )
+        return [(owners[0], Decimal("100"))]
+
     @property
     def total(self):
         """تعداد × قیمت واحد، به ارز فاکتور"""
@@ -156,3 +173,46 @@ class PurchaseLine(TimeStamped):
     def total_base(self):
         """مبلغ به ارز پایه، گردشده بر اساس اعشار ارز پایه"""
         return round_to_base(self.total * self.purchase.exchange_rate)
+
+
+class PurchaseLineOwnership(TimeStamped):
+    """سهم یک شخص از دستگاه‌های یک ردیف فاکتور خرید."""
+
+    line = models.ForeignKey(
+        PurchaseLine,
+        on_delete=models.CASCADE,
+        related_name="ownerships",
+        verbose_name="ردیف فاکتور",
+    )
+    party = models.ForeignKey(
+        Party,
+        on_delete=models.PROTECT,
+        related_name="purchase_line_ownerships",
+        verbose_name="شخص",
+    )
+    share_percent = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0.01")), MaxValueValidator(100)],
+        verbose_name="سهم (٪)",
+    )
+
+    class Meta:
+        ordering = ("id",)
+        constraints = (
+            models.UniqueConstraint(
+                fields=("line", "party"), name="uniq_line_ownership_party"
+            ),
+        )
+        verbose_name = "سهم ردیف خرید"
+        verbose_name_plural = "سهم‌های ردیف خرید"
+
+    def __str__(self):
+        return f"{self.party.name}: {self.share_percent}%"
+
+    def clean(self):
+        if self.party_id is not None and not self.party.can_own:
+            raise ValidationError(
+                {"party": "فقط صاحب فروشگاه یا شریک می‌تواند سهم داشته باشد."}
+            )
+        super().clean()

@@ -8,7 +8,7 @@ from django.test import TestCase
 from catalog.models import AttributeDefinition, Category, Product, Variant
 from core.models import Currency, Party, Period, StoreSettings
 
-from .models import Purchase, PurchaseLine
+from .models import Purchase, PurchaseLine, PurchaseLineOwnership
 
 
 def create_currencies():
@@ -432,3 +432,107 @@ class CurrencyLockWithPurchasesTests(TestCase):
         store.save()
         store.refresh_from_db()
         self.assertEqual(store.base_currency, "USD")
+
+
+class PurchaseLineOwnershipTests(TestCase):
+    def setUp(self):
+        create_currencies()
+        self.supplier = Party.objects.create(name="Supplier A", is_supplier=True)
+        self.owner = Party.objects.create(name="Owner", is_owner=True)
+        self.partner = Party.objects.create(name="Partner", is_partner=True)
+        category = Category.objects.create(name="Laptop")
+        product = Product.objects.create(category=category, model_name="x")
+        variant = Variant.objects.create(product=product)
+        purchase = Purchase.objects.create(
+            supplier=self.supplier, date=date(2026, 10, 5)
+        )
+        self.line = PurchaseLine.objects.create(
+            purchase=purchase, variant=variant, qty=2, unit_price=Decimal("10")
+        )
+
+    def share(self, party, percent):
+        return PurchaseLineOwnership.objects.create(
+            line=self.line, party=party, share_percent=Decimal(percent)
+        )
+
+    def test_default_is_hundred_percent_owner(self):
+        self.assertEqual(self.line.resolve_ownership(), [(self.owner, Decimal("100"))])
+
+    def test_no_owner_defined_rejected(self):
+        Party.objects.filter(pk=self.owner.pk).update(is_owner=False)
+        with self.assertRaises(ValidationError):
+            self.line.resolve_ownership()
+
+    def test_explicit_shares_are_returned(self):
+        self.share(self.owner, "60")
+        self.share(self.partner, "40")
+        self.assertEqual(
+            self.line.resolve_ownership(),
+            [(self.owner, Decimal("60")), (self.partner, Decimal("40"))],
+        )
+
+    def test_total_below_hundred_rejected(self):
+        self.share(self.owner, "60")
+        self.share(self.partner, "30")
+        with self.assertRaises(ValidationError):
+            self.line.resolve_ownership()
+
+    def test_total_above_hundred_rejected(self):
+        self.share(self.owner, "70")
+        self.share(self.partner, "40")
+        with self.assertRaises(ValidationError):
+            self.line.resolve_ownership()
+
+    def test_uneven_split_summing_to_hundred_accepted(self):
+        third = Party.objects.create(name="Third", is_partner=True)
+        self.share(self.owner, "33.33")
+        self.share(self.partner, "33.33")
+        self.share(third, "33.34")
+        self.assertEqual(len(self.line.resolve_ownership()), 3)
+
+    def test_valid_share_accepted(self):
+        PurchaseLineOwnership(
+            line=self.line, party=self.partner, share_percent=Decimal("50")
+        ).full_clean()
+
+    def test_share_range(self):
+        for value in ["0.01", "50", "100"]:
+            with self.subTest(value=value):
+                PurchaseLineOwnership(
+                    line=self.line, party=self.partner, share_percent=Decimal(value)
+                ).full_clean()
+        for value in ["0", "-5", "100.01"]:
+            with self.subTest(value=value):
+                with self.assertRaises(ValidationError):
+                    PurchaseLineOwnership(
+                        line=self.line, party=self.partner, share_percent=Decimal(value)
+                    ).full_clean()
+
+    def test_party_without_ownership_role_rejected(self):
+        with self.assertRaises(ValidationError):
+            PurchaseLineOwnership(
+                line=self.line, party=self.supplier, share_percent=Decimal("50")
+            ).full_clean()
+
+    def test_duplicate_party_on_same_line_rejected(self):
+        self.share(self.partner, "30")
+        second = PurchaseLineOwnership(
+            line=self.line, party=self.partner, share_percent=Decimal("20")
+        )
+        with self.assertRaises(ValidationError):
+            second.full_clean()
+
+    def test_deleting_line_deletes_its_shares(self):
+        self.share(self.partner, "100")
+        self.line.delete()
+        self.assertEqual(PurchaseLineOwnership.objects.count(), 0)
+
+    def test_cannot_delete_party_with_shares(self):
+        self.share(self.partner, "100")
+        with self.assertRaises(ProtectedError):
+            self.partner.delete()
+
+    def test_str(self):
+        row = self.share(self.partner, "40")
+        row.refresh_from_db()
+        self.assertEqual(str(row), "Partner: 40.00%")

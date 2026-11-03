@@ -662,3 +662,37 @@ class StoreSettingsBaseCurrencyLockTests(TestCase):
     def test_same_base_currency_passes_clean_after_documents(self):
         with patch("core.models._document_sources", sources(has_documents=True)):
             self.store.full_clean()
+
+
+class PartyOwnerTests(TestCase):
+    def test_owner_flag_defaults_to_false(self):
+        p = Party.objects.create(name="x")
+        self.assertFalse(p.is_owner)
+
+    def test_second_owner_rejected_in_clean(self):
+        Party.objects.create(name="A", is_owner=True)
+        second = Party(name="B", is_owner=True)
+        with self.assertRaises(ValidationError):
+            second.full_clean()
+
+    def test_second_owner_rejected_on_save(self):
+        Party.objects.create(name="A", is_owner=True)
+        with self.assertRaises(ValidationError):
+            Party.objects.create(name="B", is_owner=True)
+        self.assertEqual(Party.objects.filter(is_owner=True).count(), 1)
+
+    def test_editing_the_owner_is_accepted(self):
+        owner = Party.objects.create(name="A", is_owner=True)
+        owner.note = "changed"
+        owner.full_clean()
+        owner.save()
+
+    def test_non_owner_parties_are_unaffected(self):
+        Party.objects.create(name="A", is_owner=True)
+        Party(name="B").full_clean()
+
+    def test_can_own(self):
+        self.assertTrue(Party(name="x", is_owner=True).can_own)
+        self.assertTrue(Party(name="x", is_partner=True).can_own)
+        self.assertFalse(Party(name="x", is_supplier=True).can_own)
+        self.assertFalse(Party(name="x", is_customer=True).can_own)

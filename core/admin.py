@@ -16,8 +16,16 @@ class PartyAdmin(admin.ModelAdmin):
         "is_partner",
         "is_seller",
         "is_active",
+        "is_owner",
     )
-    list_filter = ("is_supplier", "is_customer", "is_partner", "is_seller", "is_active")
+    list_filter = (
+        "is_supplier",
+        "is_customer",
+        "is_partner",
+        "is_seller",
+        "is_active",
+        "is_owner",
+    )
     search_fields = ("name", "phone")
 
 

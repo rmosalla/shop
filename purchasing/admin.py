@@ -3,7 +3,7 @@ from django.contrib import admin
 
 from core.models import currency_choices, format_base, get_base_currency_code
 
-from .models import Purchase, PurchaseLine
+from .models import Purchase, PurchaseLine, PurchaseLineOwnership
 
 
 def format_in(amount, currency):
@@ -74,3 +74,9 @@ class PurchaseAdmin(admin.ModelAdmin):
     @admin.display(description="جمع (ارز پایه)")
     def total_base_display(self, obj):
         return format_base(obj.total_base)
+
+
+@admin.register(PurchaseLineOwnership)
+class PurchaseLineOwnershipAdmin(admin.ModelAdmin):
+    list_display = ("line", "party", "share_percent")
+    search_fields = ("party__name", "line__variant__sku")
