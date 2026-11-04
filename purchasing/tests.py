@@ -536,3 +536,305 @@ class PurchaseLineOwnershipTests(TestCase):
         row = self.share(self.partner, "40")
         row.refresh_from_db()
         self.assertEqual(str(row), "Partner: 40.00%")
+
+
+class PurchaseLockBase(TestCase):
+    Status = Purchase.Status
+
+    def setUp(self):
+        create_currencies()
+        self.supplier = Party.objects.create(name="Supplier A", is_supplier=True)
+        self.other_supplier = Party.objects.create(name="Supplier B", is_supplier=True)
+        self.partner = Party.objects.create(name="Partner", is_partner=True)
+        category = Category.objects.create(name="Laptop")
+        product = Product.objects.create(category=category, model_name="x")
+        self.variant = Variant.objects.create(product=product)
+        self.purchase = self.new_purchase()
+
+    def new_purchase(self, **overrides):
+        data = {
+            "supplier": self.supplier,
+            "date": date(2026, 10, 5),
+            "invoice_no": "A1",
+            "note": "n",
+        }
+        data.update(overrides)
+        return Purchase.objects.create(**data)
+
+    def add_line(self, purchase=None):
+        return PurchaseLine.objects.create(
+            purchase=purchase or self.purchase,
+            variant=self.variant,
+            unit_price=Decimal("10"),
+        )
+
+    def force_status(self, purchase, status):
+        """وضعیت را مستقیم در دیتابیس عوض می‌کند، بدون عبور از قاعده‌ها."""
+        Purchase.objects.filter(pk=purchase.pk).update(status=status)
+        purchase.refresh_from_db()
+
+
+class PurchaseStatusTransitionTests(PurchaseLockBase):
+    def test_draft_to_confirmed_allowed(self):
+        self.purchase.status = self.Status.CONFIRMED
+        self.purchase.save()
+        self.purchase.refresh_from_db()
+        self.assertEqual(self.purchase.status, self.Status.CONFIRMED)
+
+    def test_confirmed_to_cancelled_allowed(self):
+        self.force_status(self.purchase, self.Status.CONFIRMED)
+        self.purchase.status = self.Status.CANCELLED
+        self.purchase.save()
+        self.purchase.refresh_from_db()
+        self.assertEqual(self.purchase.status, self.Status.CANCELLED)
+
+    def test_forbidden_transitions_rejected_on_save(self):
+        S = self.Status
+        forbidden = [
+            (S.DRAFT, S.CANCELLED),
+            (S.CONFIRMED, S.DRAFT),
+            (S.CANCELLED, S.DRAFT),
+            (S.CANCELLED, S.CONFIRMED),
+        ]
+        for start, target in forbidden:
+            with self.subTest(start=start, target=target):
+                self.force_status(self.purchase, start)
+                self.purchase.status = target
+                with self.assertRaises(ValidationError):
+                    self.purchase.save()
+                self.purchase.refresh_from_db()
+                self.assertEqual(self.purchase.status, start)
+
+    def test_forbidden_transition_rejected_in_clean(self):
+        self.force_status(self.purchase, self.Status.CONFIRMED)
+        self.purchase.status = self.Status.DRAFT
+        with self.assertRaises(ValidationError):
+            self.purchase.full_clean()
+
+    def test_saving_with_unchanged_status_is_fine(self):
+        for status in self.Status:
+            with self.subTest(status=status):
+                self.force_status(self.purchase, status)
+                self.purchase.save()
+                self.purchase.refresh_from_db()
+                self.assertEqual(self.purchase.status, status)
+
+    def test_is_draft(self):
+        self.assertTrue(self.purchase.is_draft)
+        self.force_status(self.purchase, self.Status.CONFIRMED)
+        self.assertFalse(self.purchase.is_draft)
+
+    def test_new_purchase_counts_as_draft(self):
+        self.assertTrue(Purchase(supplier=self.supplier).is_draft)
+
+
+class PurchaseFieldLockTests(PurchaseLockBase):
+    def changes(self):
+        return {
+            "supplier": self.other_supplier,
+            "date": date(2026, 10, 6),
+            "currency": "USD",
+            "exchange_rate": Decimal("2"),
+        }
+
+    def test_draft_fields_are_editable(self):
+        for field, value in self.changes().items():
+            with self.subTest(field=field):
+                setattr(self.purchase, field, value)
+                self.purchase.save()
+                self.purchase.refresh_from_db()
+                self.assertEqual(getattr(self.purchase, field), value)
+
+    def test_locked_fields_rejected_after_confirmation_or_cancellation(self):
+        for status in (self.Status.CONFIRMED, self.Status.CANCELLED):
+            for field, value in self.changes().items():
+                with self.subTest(status=status, field=field):
+                    self.force_status(self.purchase, status)
+                    original = getattr(self.purchase, field)
+                    setattr(self.purchase, field, value)
+                    with self.assertRaises(ValidationError):
+                        self.purchase.save()
+                    self.purchase.refresh_from_db()
+                    self.assertEqual(getattr(self.purchase, field), original)
+
+    def test_locked_field_rejected_in_clean_after_confirmation(self):
+        self.force_status(self.purchase, self.Status.CONFIRMED)
+        self.purchase.supplier = self.other_supplier
+        with self.assertRaises(ValidationError):
+            self.purchase.full_clean()
+
+    def test_invoice_no_and_note_stay_editable_after_confirmation(self):
+        self.force_status(self.purchase, self.Status.CONFIRMED)
+        self.purchase.invoice_no = "B2"
+        self.purchase.note = "changed"
+        self.purchase.save()
+        self.purchase.refresh_from_db()
+        self.assertEqual(self.purchase.invoice_no, "B2")
+        self.assertEqual(self.purchase.note, "changed")
+
+    def test_unchanged_confirmed_purchase_passes_full_clean(self):
+        self.force_status(self.purchase, self.Status.CONFIRMED)
+        self.purchase.full_clean()
+
+    def test_confirmed_purchase_passes_full_clean_after_currency_deactivated(self):
+        purchase = self.new_purchase(currency="USD", exchange_rate=Decimal("100000"))
+        self.force_status(purchase, self.Status.CONFIRMED)
+        Currency.objects.filter(code="USD").update(is_active=False)
+        purchase.full_clean()
+
+
+class PurchaseDeleteLockTests(PurchaseLockBase):
+    def test_draft_purchase_can_be_deleted(self):
+        self.purchase.delete()
+        self.assertEqual(Purchase.objects.count(), 0)
+
+    def test_confirmed_or_cancelled_purchase_cannot_be_deleted(self):
+        for status in (self.Status.CONFIRMED, self.Status.CANCELLED):
+            with self.subTest(status=status):
+                self.force_status(self.purchase, status)
+                with self.assertRaises(ValidationError):
+                    self.purchase.delete()
+                self.assertTrue(Purchase.objects.filter(pk=self.purchase.pk).exists())
+
+
+class PurchaseLineLockTests(PurchaseLockBase):
+    def test_draft_lines_can_be_added_edited_and_deleted(self):
+        line = self.add_line()
+        line.qty = 5
+        line.save()
+        line.refresh_from_db()
+        self.assertEqual(line.qty, 5)
+        line.delete()
+        self.assertEqual(PurchaseLine.objects.count(), 0)
+
+    def test_cannot_add_line_after_confirmation(self):
+        for status in (self.Status.CONFIRMED, self.Status.CANCELLED):
+            with self.subTest(status=status):
+                self.force_status(self.purchase, status)
+                with self.assertRaises(ValidationError):
+                    self.add_line()
+                self.assertEqual(PurchaseLine.objects.count(), 0)
+
+    def test_new_line_fails_full_clean_after_confirmation(self):
+        self.force_status(self.purchase, self.Status.CONFIRMED)
+        line = PurchaseLine(
+            purchase=self.purchase, variant=self.variant, unit_price=Decimal("10")
+        )
+        with self.assertRaises(ValidationError):
+            line.full_clean()
+
+    def test_cannot_edit_line_after_confirmation(self):
+        for status in (self.Status.CONFIRMED, self.Status.CANCELLED):
+            with self.subTest(status=status):
+                line = self.add_line()
+                self.force_status(self.purchase, status)
+                line.qty = 9
+                with self.assertRaises(ValidationError):
+                    line.save()
+                line.refresh_from_db()
+                self.assertEqual(line.qty, 1)
+                Purchase.objects.filter(pk=self.purchase.pk).update(
+                    status=self.Status.DRAFT
+                )
+                line.delete()
+
+    def test_edited_line_fails_full_clean_after_confirmation(self):
+        line = self.add_line()
+        self.force_status(self.purchase, self.Status.CONFIRMED)
+        line.qty = 9
+        with self.assertRaises(ValidationError):
+            line.full_clean()
+
+    def test_unchanged_line_of_confirmed_purchase_cannot_be_saved(self):
+        line = self.add_line()
+        self.force_status(self.purchase, self.Status.CONFIRMED)
+        with self.assertRaises(ValidationError):
+            line.save()
+
+    def test_cannot_delete_line_after_confirmation(self):
+        line = self.add_line()
+        self.force_status(self.purchase, self.Status.CONFIRMED)
+        with self.assertRaises(ValidationError):
+            line.delete()
+        self.assertEqual(PurchaseLine.objects.count(), 1)
+
+    def test_cannot_move_line_into_confirmed_purchase(self):
+        confirmed = self.new_purchase(invoice_no="C")
+        self.force_status(confirmed, self.Status.CONFIRMED)
+        line = self.add_line()
+        line.purchase = confirmed
+        with self.assertRaises(ValidationError):
+            line.save()
+
+    def test_cannot_move_line_out_of_confirmed_purchase(self):
+        confirmed = self.new_purchase(invoice_no="C")
+        line = self.add_line(confirmed)
+        self.force_status(confirmed, self.Status.CONFIRMED)
+        line.purchase = self.purchase
+        with self.assertRaises(ValidationError):
+            line.save()
+
+    def test_can_move_line_between_draft_purchases(self):
+        other = self.new_purchase(invoice_no="D")
+        line = self.add_line()
+        line.purchase = other
+        line.save()
+        line.refresh_from_db()
+        self.assertEqual(line.purchase_id, other.pk)
+
+
+class PurchaseLineOwnershipLockTests(PurchaseLockBase):
+    def setUp(self):
+        super().setUp()
+        self.line = self.add_line()
+
+    def add_share(self):
+        return PurchaseLineOwnership.objects.create(
+            line=self.line, party=self.partner, share_percent=Decimal("50")
+        )
+
+    def test_draft_shares_can_be_added_edited_and_deleted(self):
+        share = self.add_share()
+        share.share_percent = Decimal("60")
+        share.save()
+        share.refresh_from_db()
+        self.assertEqual(share.share_percent, Decimal("60"))
+        share.delete()
+        self.assertEqual(PurchaseLineOwnership.objects.count(), 0)
+
+    def test_cannot_add_share_after_confirmation(self):
+        self.force_status(self.purchase, self.Status.CONFIRMED)
+        with self.assertRaises(ValidationError):
+            self.add_share()
+        self.assertEqual(PurchaseLineOwnership.objects.count(), 0)
+
+    def test_new_share_fails_full_clean_after_confirmation(self):
+        self.force_status(self.purchase, self.Status.CONFIRMED)
+        share = PurchaseLineOwnership(
+            line=self.line, party=self.partner, share_percent=Decimal("50")
+        )
+        with self.assertRaises(ValidationError):
+            share.full_clean()
+
+    def test_cannot_edit_share_after_confirmation(self):
+        share = self.add_share()
+        self.force_status(self.purchase, self.Status.CONFIRMED)
+        share.share_percent = Decimal("60")
+        with self.assertRaises(ValidationError):
+            share.save()
+        share.refresh_from_db()
+        self.assertEqual(share.share_percent, Decimal("50"))
+
+    def test_edited_share_fails_full_clean_after_confirmation(self):
+        share = self.add_share()
+        self.force_status(self.purchase, self.Status.CONFIRMED)
+        share.share_percent = Decimal("60")
+        with self.assertRaises(ValidationError):
+            share.full_clean()
+
+    def test_cannot_delete_share_after_confirmation(self):
+        share = self.add_share()
+        self.force_status(self.purchase, self.Status.CONFIRMED)
+        with self.assertRaises(ValidationError):
+            share.delete()
+        self.assertEqual(PurchaseLineOwnership.objects.count(), 1)

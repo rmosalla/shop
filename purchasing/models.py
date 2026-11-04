@@ -14,6 +14,12 @@ from core.models import (
     round_to_base,
 )
 
+ALLOWED_TRANSITIONS = {
+    "draft": ("confirmed",),
+    "confirmed": ("cancelled",),
+    "cancelled": (),
+}
+
 
 class Purchase(TimeStamped):
     class Status(models.TextChoices):
@@ -61,10 +67,12 @@ class Purchase(TimeStamped):
 
     def save(self, *args, **kwargs):
         self._normalize_currency()
+        self._ensure_valid_transition()
         super().save(*args, **kwargs)
 
     def clean(self):
         self._normalize_currency()
+        self._ensure_valid_transition()
         if self.date is not None:
             Period.assert_date_open(self.date)
         self._ensure_currency_is_available()
@@ -87,6 +95,30 @@ class Purchase(TimeStamped):
             raise ValidationError(
                 {"exchange_rate": "برای ارز پایه‌ی فروشگاه، نرخ ارز باید ۱ باشد."}
             )
+
+    def _stored_status(self):
+        """وضعیت ذخیره‌شده در دیتابیس، یا None برای فاکتور جدید."""
+        if self.pk is None:
+            return None
+        return (
+            Purchase.objects.filter(pk=self.pk).values_list("status", flat=True).first()
+        )
+
+    def _ensure_valid_transition(self):
+        stored = self._stored_status()
+        if stored not in (None, self.status):
+            if self.status not in ALLOWED_TRANSITIONS[stored]:
+                raise ValidationError(
+                    {
+                        "status": f"تغییر وضعیت از «{self.Status(stored).label}» "
+                        f"به «{self.Status(self.status).label}» مجاز نیست."
+                    }
+                )
+
+    @property
+    def is_draft(self):
+        stored = self._stored_status()
+        return stored in (None, self.Status.DRAFT)
 
     @property
     def total(self):
