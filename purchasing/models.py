@@ -301,9 +301,46 @@ class PurchaseLineOwnership(TimeStamped):
     def __str__(self):
         return f"{self.party.name}: {self.share_percent}%"
 
+    def save(self, *args, **kwargs):
+        self._ensure_purchase_is_draft()
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        self._ensure_purchase_is_draft()
+        return super().delete(*args, **kwargs)
+
     def clean(self):
+        self._ensure_purchase_is_draft()
         if self.party_id is not None and not self.party.can_own:
             raise ValidationError(
                 {"party": "فقط صاحب فروشگاه یا شریک می‌تواند سهم داشته باشد."}
             )
         super().clean()
+
+    def _stored_line_id(self):
+        """شناسه‌ی ردیفی که این سهم به آن وصل است (یا None برای سهم جدید)."""
+        if self.pk is None:
+            return None
+        return (
+            PurchaseLineOwnership.objects.filter(pk=self.pk)
+            .values_list("line_id", flat=True)
+            .first()
+        )
+
+    def _ensure_purchase_is_draft(self):
+        line_ids = {self.line_id, self._stored_line_id()} - {None}
+        for line_id in line_ids:
+            status = (
+                Purchase.objects.filter(lines__pk=line_id)
+                .values_list("status", flat=True)
+                .first()
+            )
+            if status != Purchase.Status.DRAFT:
+                raise ValidationError(
+                    {
+                        "line": (
+                            "سهم‌ها فقط برای فاکتور پیش‌نویس "
+                            "قابل افزودن، ویرایش یا حذف هستند."
+                        )
+                    }
+                )

@@ -839,6 +839,31 @@ class PurchaseLineOwnershipLockTests(PurchaseLockBase):
             share.delete()
         self.assertEqual(PurchaseLineOwnership.objects.count(), 1)
 
+    def test_cannot_move_share_into_confirmed_purchase(self):
+        confirmed = self.new_purchase(invoice_no="C")
+        confirmed_line = self.add_line(confirmed)
+        self.force_status(confirmed, self.Status.CONFIRMED)
+        share = self.add_share()
+        share.line = confirmed_line
+        with self.assertRaises(ValidationError):
+            share.save()
+
+    def test_cannot_move_share_out_of_confirmed_purchase(self):
+        share = self.add_share()
+        other_line = self.add_line(self.new_purchase(invoice_no="D"))
+        self.force_status(self.purchase, self.Status.CONFIRMED)
+        share.line = other_line
+        with self.assertRaises(ValidationError):
+            share.save()
+
+    def test_can_move_share_between_draft_lines(self):
+        share = self.add_share()
+        other_line = self.add_line(self.new_purchase(invoice_no="E"))
+        share.line = other_line
+        share.save()
+        share.refresh_from_db()
+        self.assertEqual(share.line_id, other_line.pk)
+
 
 class PurchaseClosedPeriodTests(PurchaseLockBase):
     def close_october(self):
