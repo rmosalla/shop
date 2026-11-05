@@ -68,16 +68,24 @@ class Purchase(TimeStamped):
     def save(self, *args, **kwargs):
         self._normalize_currency()
         self._ensure_valid_transition()
+        self._ensure_fields_unlocked()
         super().save(*args, **kwargs)
 
     def clean(self):
         self._normalize_currency()
         self._ensure_valid_transition()
+        self._ensure_fields_unlocked()
         if self.date is not None:
             Period.assert_date_open(self.date)
-        self._ensure_currency_is_available()
+        if self.is_draft:
+            self._ensure_currency_is_available()
         self._ensure_rate_matches_currency()
         super().clean()
+
+    def delete(self, *args, **kwargs):
+        if not self.is_draft:
+            raise ValidationError("فاکتور ثبت‌شده یا باطل قابل حذف نیست.")
+        return super().delete(*args, **kwargs)
 
     def get_currency(self):
         """رکورد ارز این فاکتور در جدول ارزها (یا None)."""
@@ -115,6 +123,20 @@ class Purchase(TimeStamped):
                     }
                 )
 
+    def _ensure_fields_unlocked(self):
+        errors = {}
+        status = self._stored_status()
+        if status not in (None, self.Status.DRAFT):
+            names = ("supplier_id", "date", "currency", "exchange_rate")
+            stored_values = Purchase.objects.filter(pk=self.pk).values(*names).first()
+            for name in names:
+                if stored_values[name] != getattr(self, name):
+                    errors[name.removesuffix("_id")] = (
+                        "این فیلد بعد از ثبت فاکتور قابل تغییر نیست."
+                    )
+        if errors:
+            raise ValidationError(errors)
+
     @property
     def is_draft(self):
         stored = self._stored_status()
@@ -127,7 +149,7 @@ class Purchase(TimeStamped):
 
     @property
     def total_base(self):
-        """جمع total_base همه‌ی ردیف‌ه"""
+        """جمع total_base همه‌ی ردیف‌ها"""
         return sum((line.total_base for line in self.lines.all()), Decimal("0"))
 
 
