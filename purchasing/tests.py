@@ -838,3 +838,39 @@ class PurchaseLineOwnershipLockTests(PurchaseLockBase):
         with self.assertRaises(ValidationError):
             share.delete()
         self.assertEqual(PurchaseLineOwnership.objects.count(), 1)
+
+
+class PurchaseClosedPeriodTests(PurchaseLockBase):
+    def close_october(self):
+        Period.objects.create(
+            name="october",
+            start_date=date(2026, 10, 1),
+            end_date=date(2026, 10, 30),
+            status=Period.Status.CLOSED,
+        )
+
+    def test_draft_in_closed_period_rejected(self):
+        self.close_october()
+        with self.assertRaises(ValidationError):
+            self.purchase.full_clean()
+
+    def test_confirmed_purchase_in_closed_period_passes_full_clean(self):
+        self.force_status(self.purchase, self.Status.CONFIRMED)
+        self.close_october()
+        self.purchase.full_clean()
+
+    def test_confirmed_purchase_in_closed_period_note_can_change(self):
+        self.force_status(self.purchase, self.Status.CONFIRMED)
+        self.close_october()
+        self.purchase.note = "updated"
+        self.purchase.full_clean()
+        self.purchase.save()
+        self.purchase.refresh_from_db()
+        self.assertEqual(self.purchase.note, "updated")
+
+    def test_confirmed_purchase_in_closed_period_date_stays_locked(self):
+        self.force_status(self.purchase, self.Status.CONFIRMED)
+        self.close_october()
+        self.purchase.date = date(2026, 10, 6)
+        with self.assertRaises(ValidationError):
+            self.purchase.full_clean()

@@ -75,7 +75,7 @@ class Purchase(TimeStamped):
         self._normalize_currency()
         self._ensure_valid_transition()
         self._ensure_fields_unlocked()
-        if self.date is not None:
+        if self.date is not None and self.is_draft:
             Period.assert_date_open(self.date)
         if self.is_draft:
             self._ensure_currency_is_available()
@@ -184,7 +184,16 @@ class PurchaseLine(TimeStamped):
     def __str__(self):
         return f"{self.variant.sku} x {self.qty}"
 
+    def save(self, *args, **kwargs):
+        self._ensure_purchase_is_draft()
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        self._ensure_purchase_is_draft()
+        return super().delete(*args, **kwargs)
+
     def clean(self):
+        self._ensure_purchase_is_draft()
         if self.purchase_id is not None and isinstance(self.unit_price, Decimal):
             currency = self.purchase.get_currency()
             if (
@@ -217,6 +226,34 @@ class PurchaseLine(TimeStamped):
                 "برای سهم پیش‌فرض باید دقیقاً یک نفر به‌عنوان صاحب فروشگاه تعریف شده باشد."
             )
         return [(owners[0], Decimal("100"))]
+
+    def _stored_purchase_id(self):
+        """شناسه‌ی فاکتور ذخیره‌شده در دیتابیس، یا None برای ردیف جدید."""
+        if self.pk is None:
+            return None
+        return (
+            PurchaseLine.objects.filter(pk=self.pk)
+            .values_list("purchase_id", flat=True)
+            .first()
+        )
+
+    def _ensure_purchase_is_draft(self):
+        purchase_ids = {self.purchase_id, self._stored_purchase_id()} - {None}
+        for purchase_id in purchase_ids:
+            status = (
+                Purchase.objects.filter(pk=purchase_id)
+                .values_list("status", flat=True)
+                .first()
+            )
+            if status != Purchase.Status.DRAFT:
+                raise ValidationError(
+                    {
+                        "purchase": (
+                            "فقط ردیف‌های فاکتور پیش‌نویس "
+                            "قابل افزودن، ویرایش یا حذف هستند."
+                        )
+                    }
+                )
 
     @property
     def total(self):
