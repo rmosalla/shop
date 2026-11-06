@@ -22,8 +22,9 @@ class PurchaseAdminForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["currency"].choices = currency_choices()
-        self.fields["currency"].initial = get_base_currency_code()
+        if "currency" in self.fields:
+            self.fields["currency"].choices = currency_choices()
+            self.fields["currency"].initial = get_base_currency_code()
 
 
 class PurchaseLineInline(admin.TabularInline):
@@ -42,6 +43,21 @@ class PurchaseLineInline(admin.TabularInline):
         if obj.pk is None:
             return "-"
         return format_base(obj.total_base)
+
+    def has_add_permission(self, request, obj=None):
+        if obj is not None and not obj.is_draft:
+            return False
+        return super().has_add_permission(request, obj)
+
+    def has_change_permission(self, request, obj=None):
+        if obj is not None and not obj.is_draft:
+            return False
+        return super().has_change_permission(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        if obj is not None and not obj.is_draft:
+            return False
+        return super().has_delete_permission(request, obj)
 
 
 @admin.register(Purchase)
@@ -75,8 +91,32 @@ class PurchaseAdmin(admin.ModelAdmin):
     def total_base_display(self, obj):
         return format_base(obj.total_base)
 
+    def get_readonly_fields(self, request, obj=None):
+        fields_list = [
+            "status",
+        ]
+        if obj is not None and not obj.is_draft:
+            fields_list.extend(["supplier", "date", "currency", "exchange_rate"])
+        return tuple(fields_list)
+
+    def has_delete_permission(self, request, obj=None):
+        if obj is not None and not obj.is_draft:
+            return False
+        return super().has_delete_permission(request, obj)
+
 
 @admin.register(PurchaseLineOwnership)
 class PurchaseLineOwnershipAdmin(admin.ModelAdmin):
     list_display = ("line", "party", "share_percent")
     search_fields = ("party__name", "line__variant__sku")
+
+    def has_change_permission(self, request, obj=None):
+        if obj is not None and not obj.line.purchase.is_draft:
+            return False
+        else:
+            return super().has_change_permission(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        if obj is not None and not obj.line.purchase.is_draft:
+            return False
+        return super().has_delete_permission(request, obj)
