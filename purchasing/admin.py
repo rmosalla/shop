@@ -1,7 +1,9 @@
 from django import forms
-from django.contrib import admin
+from django.contrib import admin, messages
+from django.core.exceptions import ValidationError
 
 from core.models import currency_choices, format_base, get_base_currency_code
+from inventory.services import cancel_purchase, confirm_purchase
 
 from .models import Purchase, PurchaseLine, PurchaseLineOwnership
 
@@ -82,6 +84,7 @@ class PurchaseAdmin(admin.ModelAdmin):
         "supplier__name",
     )
     inlines = (PurchaseLineInline,)
+    actions = ("confirm_selected", "cancel_selected")
 
     @admin.display(description="جمع (ارز فاکتور)")
     def total_display(self, obj):
@@ -103,6 +106,60 @@ class PurchaseAdmin(admin.ModelAdmin):
         if obj is not None and not obj.is_draft:
             return False
         return super().has_delete_permission(request, obj)
+
+    @admin.action(description="ثبت فاکتورهای انتخاب‌شده")
+    def confirm_selected(self, request, queryset):
+        done = 0
+        units_count = 0
+        for purchase in queryset:
+            try:
+                units = confirm_purchase(purchase)
+            except ValidationError as error:
+                reason = " ".join(error.messages)
+                self.message_user(
+                    request,
+                    f"فاکتور {purchase.supplier.name} به تاریخ"
+                    f"{purchase.date}: {reason}",
+                    messages.ERROR,
+                )
+            else:
+                done += 1
+                units_count += len(units)
+
+        if done > 0:
+            self.message_user(
+                request,
+                f"تعداد {done} فاکتور ثبت شد و {units_count} دستگاه ساخته شد",
+            )
+        else:
+            self.message_user(request, "فاکتوری ثبت نشد", messages.ERROR)
+
+    @admin.action(description="ابطال فاکتورهای انتخاب‌شده")
+    def cancel_selected(self, request, queryset):
+        done = 0
+        units_count = 0
+        for purchase in queryset:
+            try:
+                units = cancel_purchase(purchase)
+            except ValidationError as error:
+                reason = " ".join(error.messages)
+                self.message_user(
+                    request,
+                    f"فاکتور {purchase.supplier.name} به تاریخ"
+                    f"{purchase.date}: {reason}",
+                    messages.ERROR,
+                )
+            else:
+                done += 1
+                units_count += len(units)
+
+        if done > 0:
+            self.message_user(
+                request,
+                f"تعداد {done} فاکتور و {units_count} دستگاه خارج شد",
+            )
+        else:
+            self.message_user(request, "فاکتوری باطل نشد", messages.ERROR)
 
 
 @admin.register(PurchaseLineOwnership)
