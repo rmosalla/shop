@@ -1,7 +1,7 @@
 from django.core.exceptions import ValidationError
 from django.db import transaction
 
-from core.models import round_to_base
+from core.models import Period, round_to_base
 from purchasing.models import Purchase
 
 from .models import Unit, UnitOwnership
@@ -38,5 +38,29 @@ def confirm_purchase(purchase):
                     )
                 units.append(unit)
         purchase.status = Purchase.Status.CONFIRMED
+        purchase.save()
+        return units
+
+
+def cancel_purchase(purchase):
+    """فاکتور ثبت‌شده را باطل می‌کند و دستگاه‌های آن را خارج می‌کند."""
+    with transaction.atomic():
+        is_confirmed = Purchase.objects.filter(
+            pk=purchase.pk, status=Purchase.Status.CONFIRMED
+        ).exists()
+        if not is_confirmed:
+            raise ValidationError("فقط فاکتور ثبت‌شده قابل ابطال است")
+        Period.assert_date_open(purchase.date)
+        units = list(Unit.objects.filter(purchase_line__purchase=purchase))
+        blocked = [unit for unit in units if unit.status != Unit.Status.IN_STOCK]
+        if blocked:
+            codes = "، ".join(unit.uid for unit in blocked)
+            raise ValidationError(
+                f"دستگاه‌های زیر دیگر موجود نیستند و فاکتور قابل ابطال نیست: {codes}"
+            )
+        for unit in units:
+            unit.status = Unit.Status.WRITTEN_OFF
+            unit.save()
+        purchase.status = Purchase.Status.CANCELLED
         purchase.save()
         return units
